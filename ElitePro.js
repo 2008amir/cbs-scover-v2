@@ -480,7 +480,7 @@ async function handleExtraCommands(EliteProTech, m) {
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
     /* ---------- PROMOTE (no admin check on our side) ---------- */
-    if (command === 'promote' || command === 'promotewhennot') {
+    if (command === 'promote') {
         if (!isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
             return true;
@@ -757,9 +757,9 @@ function patchHandler(source) {
     };
 
     // SETTINGS
-    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n', 'settings-commands');
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Addstatus\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n│𖥟╾ Promotewhennot\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
     // GENERAL
