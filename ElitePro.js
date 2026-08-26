@@ -63,7 +63,7 @@ function normalizeHausa(text) {
     return out.trim();
 }
 
-async function speechmaBuffer(text, voice, rate = 1, pitch = 0) {
+async function speechmaBuffer(text, voice, rate = 1.5, pitch = 0) {
     const res = await axios.get(
         `https://apis.davidcyril.name.ng/tools/speechma?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}&pitch=${pitch}&rate=${rate}`,
         { responseType: 'arraybuffer', timeout: 120000 }
@@ -89,8 +89,8 @@ async function makeVoice(text, gender, hausa) {
     if (hausa) {
         const clean = normalizeHausa(text);
         const attempts = [
-            () => speechmaBuffer(clean, HAUSA_VOICE_IDS[gender] || HAUSA_VOICE_IDS.male, 0.9),
-            () => speechmaBuffer(clean, VOICES[`hausa_${gender}`] || VOICES.hausa_male, 0.9),
+            () => speechmaBuffer(clean, HAUSA_VOICE_IDS[gender] || HAUSA_VOICE_IDS.male, 1.35),
+            () => speechmaBuffer(clean, VOICES[`hausa_${gender}`] || VOICES.hausa_male, 1.35),
             () => googleBuffer(clean, 'ha')
         ];
         let lastErr;
@@ -190,6 +190,7 @@ async function handleAiVoice(EliteProTech, m) {
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
 const ANTIDELETE_FILE = path.join(__dirname, 'database', 'antidelete.json');
+const ANTIDELETE_GROUP_FILE = path.join(__dirname, 'database', 'antideletegroup.json');
 
 function readJson(file, fallback) {
     try {
@@ -255,6 +256,45 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
+    if (command === 'antideletegroup' || command === 'antideletegroupmessage') {
+        const opt = args.toLowerCase().trim();
+        const config = readJson(ANTIDELETE_GROUP_FILE, { all: false, chats: {} });
+        config.chats = config.chats || {};
+        const isGroup = String(m.chat || '').endsWith('@g.us');
+
+        if (opt === 'enable' || opt === 'on') {
+            if (!isGroup) {
+                await reply('ℹ️ Use this command inside the group you want to protect.');
+                return true;
+            }
+            config.chats[m.chat] = true;
+            writeJson(ANTIDELETE_GROUP_FILE, config);
+            // capture must be on for restoring to be possible
+            const anti = readJson(ANTIDELETE_FILE, { enabled: false });
+            anti.enabled = true;
+            writeJson(ANTIDELETE_FILE, anti);
+            await reply(
+                '✅ *Anti-delete group message enabled for this group.*\n\n' +
+                'Whenever anyone (member or admin) deletes a message for everyone, I instantly re-post it here and warn them that they cannot delete another member\u2019s message.\n\n' +
+                '⚠️ Note: WhatsApp itself controls the delete button inside the official app, so the warning appears here in the chat, not inside their app dialog.'
+            );
+            return true;
+        }
+        if (opt === 'disable' || opt === 'off') {
+            if (isGroup) delete config.chats[m.chat];
+            config.all = false;
+            writeJson(ANTIDELETE_GROUP_FILE, config);
+            await reply('❌ *Anti-delete group message disabled.*');
+            return true;
+        }
+        const on = config.all === true || config.chats[m.chat] === true;
+        await reply(
+            `🛡️ *ANTI DELETE GROUP MESSAGE*\n\nStatus here: ${on ? '✅ ENABLED' : '❌ DISABLED'}\n\n` +
+            `*${prefix}antideletegroup enable*\n*${prefix}antideletegroup disable*`
+        );
+        return true;
+    }
+
     return false;
 }
 
@@ -266,12 +306,40 @@ function patchHandler(source) {
     // Bot image was renamed during rebranding.
     code = code.split('elitepropic.jpg').join('cbs-scover.jpg');
 
-    // Show the group link in the menu.
-    const ownerLine = '┣❍ *ᴏᴡɴᴇʀ:* ${ownername}';
-    if (code.includes(ownerLine)) {
-        code = code.split(ownerLine).join(`${ownerLine}\n┣❍ *ɢʀᴏᴜᴘ:* ${GROUP_LINK}`);
+    // Menu title.
+    code = code.split('┃ *ᴇʟɪᴛᴇ-ᴘʀᴏ-ᴠɪ ʙᴏᴛ ᴍᴇɴᴜ*').join('┃ *CBS-SCOVER*');
+
+    // Remove any leftover plain group link line in the menu body.
+    code = code.split(`\n┣❍ *ɢʀᴏᴜᴘ:* ${GROUP_LINK}`).join('');
+
+    // List the locally added commands in the menu.
+    if (code.includes('│𖥟╾ Antidelete\n')) {
+        code = code.split('│𖥟╾ Antidelete\n').join('│𖥟╾ Antidelete\n│𖥟╾ Antideletemessage\n│𖥟╾ Antideletegroup\n│𖥟╾ Chatbotname\n');
     } else {
-        console.log('⚠️ Menu group-link patch target not found.');
+        console.log('⚠️ Menu settings-commands patch target not found.');
+    }
+    if (code.includes('│𖥟╾ Aivoice\n')) {
+        code = code.split('│𖥟╾ Aivoice\n').join('│𖥟╾ Aivoice\n│𖥟╾ Aivoice-male\n│𖥟╾ Aivoice-female\n│𖥟╾ Aivoice-hausa\n│𖥟╾ Aivoice-hausa-female\n');
+    } else {
+        console.log('⚠️ Menu ai-commands patch target not found.');
+    }
+
+    // Send the menu with group + channel buttons at the bottom.
+    const menuSend = `await EliteProTech.sendMessage(m.chat, {
+  image: elitepropic,
+  caption: elitemenuoh
+}, { quoted: m });`;
+    if (code.includes(menuSend)) {
+        code = code.split(menuSend).join('await global.sendMenu(EliteProTech, m, elitepropic, elitemenuoh);');
+    } else {
+        console.log('⚠️ Menu button patch target not found.');
+    }
+
+    // Private mode: only the owner's own WhatsApp account can run commands.
+    if (code.includes('if (!isCreator && !m.key.fromMe) return')) {
+        code = code.split('if (!isCreator && !m.key.fromMe) return').join('if (!m.key.fromMe) return');
+    } else {
+        console.log('⚠️ Private-mode patch target not found.');
     }
 
     // Branding
@@ -279,7 +347,9 @@ function patchHandler(source) {
         .split('2347047504860').join(OWNER_NUMBER)
         .split('https://t.me/eliteprotechs').join('https://t.me/cbsscover')
         .split('https://www.youtube.com/@eliteprotechs').join(CHANNEL_LINK)
-        .split('https://eliteprotech.zone.id/').join('https://codebreakers.uk/');
+        .split('https://eliteprotech.zone.id/').join('https://codebreakers.uk/')
+        .split('ᴇʟɪᴛᴇ-ᴘʀᴏ-ᴛᴇᴄʜ').join('ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ')
+        .split('ᴇʟɪᴛᴇᴘʀᴏ-ᴛᴇᴄʜ').join('ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ');
 
     return code;
 }
