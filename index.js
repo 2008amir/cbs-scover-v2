@@ -438,9 +438,10 @@ global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTe
         }
 
         const warn =
-            `🚫 *ANTI DELETE GROUP MESSAGE IS ON*\n\n` +
-            `@${String(deletedBy || '').split('@')[0]}, you cannot delete @${String(sentBy || '').split('@')[0]}'s message here.\n` +
-            `The message has been restored below.`;
+            `🚫 *DELETED MESSAGE RESTORED*\n\n` +
+            `✍️ Sent by: @${String(sentBy || '').split('@')[0]}\n` +
+            `🗑️ Deleted by: @${String(deletedBy || '').split('@')[0]}\n` +
+            `💬 The message is below:`;
 
         await global.restoreDeletedMessage(
             EliteProTech,

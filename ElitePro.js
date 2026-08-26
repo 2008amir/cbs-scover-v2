@@ -226,7 +226,250 @@ function writeJson(file, data) {
     }
 }
 
+/* ---------- shared helpers for the local commands ---------- */
+
+const USERNAME_FILE = path.join(__dirname, 'database', 'username.json');
+const GROUP_STATUS_FILE = path.join(__dirname, 'database', 'groupstatus.json');
+const MENU_BUTTON_FILE = path.join(__dirname, 'database', 'menubuttons.json');
+
+function ownerJid(EliteProTech) {
+    const me = EliteProTech?.user?.id || '';
+    const num = String(me).split(':')[0].split('@')[0];
+    return `${num || OWNER_NUMBER}@s.whatsapp.net`;
+}
+
+function contextOf(m) {
+    const msg = m?.message || {};
+    return (
+        msg.extendedTextMessage?.contextInfo ||
+        msg.imageMessage?.contextInfo ||
+        msg.videoMessage?.contextInfo ||
+        m?.msg?.contextInfo ||
+        null
+    );
+}
+
+function quotedInfo(m) {
+    const ctx = contextOf(m);
+    if (!ctx?.quotedMessage) return null;
+    return {
+        message: ctx.quotedMessage,
+        key: {
+            remoteJid: m.chat,
+            fromMe: false,
+            id: ctx.stanzaId,
+            participant: ctx.participant
+        }
+    };
+}
+
+function unwrap(message) {
+    let current = message || {};
+    for (let i = 0; i < 5; i++) {
+        const inner =
+            current?.viewOnceMessageV2Extension?.message ||
+            current?.viewOnceMessageV2?.message ||
+            current?.viewOnceMessage?.message ||
+            current?.ephemeralMessage?.message ||
+            current?.documentWithCaptionMessage?.message;
+        if (!inner) break;
+        current = inner;
+    }
+    const clean = {};
+    for (const [k, v] of Object.entries(current)) {
+        clean[k] = v && typeof v === 'object' ? { ...v, viewOnce: false } : v;
+    }
+    return clean;
+}
+
+async function downloadQuoted(EliteProTech, q) {
+    const baileys = require('baileys');
+    const { downloadMediaMessage, downloadContentFromMessage } = baileys;
+    const message = unwrap(q.message);
+    const TYPES = {
+        imageMessage: 'image',
+        videoMessage: 'video',
+        audioMessage: 'audio',
+        stickerMessage: 'sticker',
+        documentMessage: 'document'
+    };
+    const attempts = [
+        () => downloadMediaMessage({ key: q.key, message }, 'buffer', {}, { reuploadRequest: EliteProTech.updateMediaMessage }),
+        () => downloadMediaMessage({ key: q.key, message: q.message }, 'buffer', {}, { reuploadRequest: EliteProTech.updateMediaMessage }),
+        async () => {
+            const type = Object.keys(TYPES).find(k => message[k]);
+            if (!type) throw new Error('no media node');
+            const stream = await downloadContentFromMessage(message[type], TYPES[type]);
+            const chunks = [];
+            for await (const chunk of stream) chunks.push(chunk);
+            return Buffer.concat(chunks);
+        }
+    ];
+    let lastErr;
+    for (const attempt of attempts) {
+        try {
+            const buf = await attempt();
+            if (buf && buf.length) return buf;
+            lastErr = new Error('empty buffer');
+        } catch (err) {
+            lastErr = err;
+            console.error('download attempt failed:', err?.message || err);
+        }
+    }
+    throw lastErr || new Error('download failed');
+}
+
+// Full (uncropped) group picture: WhatsApp only crops when the client asks it
+// to, so the raw JPEG is uploaded directly.
+async function setFullProfilePicture(EliteProTech, jid, buffer) {
+    await EliteProTech.query({
+        tag: 'iq',
+        attrs: { to: jid, type: 'set', xmlns: 'w:profile:picture' },
+        content: [{ tag: 'picture', attrs: { type: 'image' }, content: buffer }]
+    });
+}
+
+async function sendViewOnceCopy(EliteProTech, q, target, m) {
+    const message = unwrap(q.message);
+    const from = String(q.key.participant || m.chat || '').split('@')[0];
+    const header = `👁️ *VIEW ONCE RECOVERED*\n👤 From: @${from}\n💬 Chat: ${m.chat}`;
+    const options = { mentions: [q.key.participant || m.chat].filter(Boolean) };
+
+    if (message.imageMessage) {
+        const buffer = await downloadQuoted(EliteProTech, q);
+        return EliteProTech.sendMessage(target, { image: buffer, caption: `${header}\n\n${message.imageMessage.caption || ''}`.trim(), ...options });
+    }
+    if (message.videoMessage) {
+        const buffer = await downloadQuoted(EliteProTech, q);
+        return EliteProTech.sendMessage(target, { video: buffer, caption: `${header}\n\n${message.videoMessage.caption || ''}`.trim(), ...options });
+    }
+    if (message.audioMessage) {
+        const buffer = await downloadQuoted(EliteProTech, q);
+        await EliteProTech.sendMessage(target, { text: header, ...options });
+        return EliteProTech.sendMessage(target, {
+            audio: buffer,
+            ptt: !!message.audioMessage.ptt,
+            mimetype: message.audioMessage.mimetype || 'audio/mpeg'
+        });
+    }
+    const text = message.conversation || message.extendedTextMessage?.text;
+    if (text) return EliteProTech.sendMessage(target, { text: `${header}\n\n${text}`, ...options });
+    throw new Error('unsupported view once content');
+}
+
+/* ---------- menu button builder ---------- */
+
+function menuButtonHelp(prefix) {
+    return (
+        `🔘 *MENU BUTTON*\n\n` +
+        `Write your post, then one line per button:\n\n` +
+        `*${prefix}menubutton* Your message here\n` +
+        `| Open Website | https://codebreakers.uk\n` +
+        `| Say Hello | msg: Hello there | to: 2349162748703\n` +
+        `| Ping Us | msg: ping\n\n` +
+        `• A line with a link becomes a button that opens the link.\n` +
+        `• A line with *msg:* sends that message when pressed.\n` +
+        `• *to:* is the target chat (number or group id). Without it the reply goes back to the same chat.\n` +
+        `• Add another *|* line to add another button.\n` +
+        `• To attach an image, reply to the image with the command.`
+    );
+}
+
+function parseMenuButton(args) {
+    const lines = String(args || '').split('\n');
+    const bodyLines = [];
+    const buttons = [];
+    const store = readJson(MENU_BUTTON_FILE, {});
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (!line.startsWith('|')) {
+            bodyLines.push(raw);
+            continue;
+        }
+        const parts = line.slice(1).split('|').map(p => p.trim()).filter(Boolean);
+        if (!parts.length) continue;
+        const label = parts[0].slice(0, 25);
+        const url = parts.find(p => /^https?:\/\//i.test(p));
+        if (url) {
+            buttons.push({
+                name: 'cta_url',
+                buttonParamsJson: JSON.stringify({ display_text: label, url, merchant_url: url })
+            });
+            continue;
+        }
+        const msgPart = parts.find(p => /^msg:/i.test(p));
+        const toPart = parts.find(p => /^to:/i.test(p));
+        const id = `mbtn_${Date.now()}_${buttons.length}`;
+        store[id] = {
+            text: msgPart ? msgPart.replace(/^msg:/i, '').trim() : label,
+            to: toPart ? normalizeJid(toPart.replace(/^to:/i, '').trim()) : null
+        };
+        buttons.push({
+            name: 'quick_reply',
+            buttonParamsJson: JSON.stringify({ display_text: label, id })
+        });
+    }
+
+    writeJson(MENU_BUTTON_FILE, store);
+    return { body: bodyLines.join('\n').trim() || ' ', buttons };
+}
+
+function normalizeJid(value) {
+    const v = String(value || '').trim();
+    if (!v) return null;
+    if (v.includes('@')) return v;
+    const digits = v.replace(/\D/g, '');
+    return digits ? `${digits}@s.whatsapp.net` : null;
+}
+
+async function sendButtonPost(EliteProTech, m, body, buttons, image) {
+    const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = require('baileys');
+    const interactive = {
+        body: proto.Message.InteractiveMessage.Body.create({ text: body }),
+        footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons })
+    };
+    if (image) {
+        const media = await prepareWAMessageMedia({ image }, { upload: EliteProTech.waUploadToServer });
+        interactive.header = proto.Message.InteractiveMessage.Header.create({ hasMediaAttachment: true, ...media });
+    }
+    const msg = generateWAMessageFromContent(
+        m.chat,
+        proto.Message.fromObject({
+            viewOnceMessage: { message: { interactiveMessage: proto.Message.InteractiveMessage.create(interactive) } }
+        }),
+        { userJid: EliteProTech.user?.id || m.chat, quoted: m }
+    );
+    await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
+}
+
+// Runs when someone presses one of the generated buttons.
+async function handleButtonPress(EliteProTech, m) {
+    const msg = m?.message || {};
+    const id =
+        msg.templateButtonReplyMessage?.selectedId ||
+        msg.buttonsResponseMessage?.selectedButtonId ||
+        (() => {
+            const raw = msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+            if (!raw) return null;
+            try { return JSON.parse(raw)?.id || null; } catch { return null; }
+        })();
+    if (!id || !String(id).startsWith('mbtn_')) return false;
+
+    const store = readJson(MENU_BUTTON_FILE, {});
+    const action = store[id];
+    if (!action) return false;
+
+    const target = action.to || m.chat;
+    await EliteProTech.sendMessage(target, { text: action.text }).catch(err =>
+        console.error('button action failed:', err?.message || err)
+    );
+    return true;
+}
+
 async function handleExtraCommands(EliteProTech, m) {
+
     const prefix = global.prefix || '.';
     const body = extractBody(m);
     if (!body || !body.startsWith(prefix)) return false;
@@ -234,6 +477,143 @@ async function handleExtraCommands(EliteProTech, m) {
     const command = body.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
     const args = body.slice(prefix.length + command.length).trim();
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
+    const isGroupChat = String(m.chat || '').endsWith('@g.us');
+
+    /* ---------- USERNAME (settings) ---------- */
+    if (command === 'username' || command === 'setusername') {
+        const current = readJson(USERNAME_FILE, {}).name || '';
+        if (!args) {
+            await reply(
+                `👤 *USERNAME*\n\nCurrent: *${current || 'not set'}*\n\nSet it with:\n*${prefix}username <your name>*`
+            );
+            return true;
+        }
+        const name = args.slice(0, 40);
+        writeJson(USERNAME_FILE, { name });
+        global.username = name;
+        await reply(`✅ Username set to *${name}*.`);
+        return true;
+    }
+
+    /* ---------- GROUP PROFILE PICTURE ---------- */
+    if (command === 'grouppp' || command === 'groupfullpp') {
+        if (!isGroupChat) {
+            await reply('ℹ️ Use this command inside a group.');
+            return true;
+        }
+        const q = quotedInfo(m);
+        if (!q || !(q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
+            await reply(`🖼️ Reply to an image with *${prefix}${command}*.`);
+            return true;
+        }
+        try {
+            const buffer = await downloadQuoted(EliteProTech, q);
+            if (command === 'groupfullpp') {
+                await setFullProfilePicture(EliteProTech, m.chat, buffer);
+                await reply('✅ Group profile picture updated (full image, no crop).');
+            } else {
+                await EliteProTech.updateProfilePicture(m.chat, buffer);
+                await reply('✅ Group profile picture updated (cropped).');
+            }
+        } catch (err) {
+            console.error('grouppp error:', err?.message || err);
+            await reply('❌ Failed to update the group picture. Make sure I am a group admin.');
+        }
+        return true;
+    }
+
+    /* ---------- GROUP STATUS ---------- */
+    if (command === 'groupstatus') {
+        if (!isGroupChat) {
+            await reply('ℹ️ Use this command inside a group.');
+            return true;
+        }
+        const store = readJson(GROUP_STATUS_FILE, {});
+        const list = store[m.chat] = store[m.chat] || [];
+        const sub = args.toLowerCase().split(/ +/)[0];
+        const rest = args.slice(sub.length).trim();
+        const q = quotedInfo(m);
+        const quotedText = q ? (q.message.conversation || q.message.extendedTextMessage?.text || q.message.imageMessage?.caption || q.message.videoMessage?.caption || '') : '';
+
+        if (sub === 'add') {
+            const entry = (rest || quotedText).trim();
+            if (!entry) {
+                await reply(`➕ Reply to what you want to add, or type it:\n*${prefix}groupstatus add <text>*`);
+                return true;
+            }
+            list.push(entry.slice(0, 1000));
+            writeJson(GROUP_STATUS_FILE, store);
+            await reply(`✅ Added to the group status.\n\n*${list.length}.* ${entry}`);
+            return true;
+        }
+
+        if (sub === 'remove' || sub === 'delete' || sub === 'del') {
+            const target = (rest || quotedText).trim();
+            if (!target) {
+                await reply(`➖ Reply to the status you want to remove with *${prefix}groupstatus remove*, or pass its number.`);
+                return true;
+            }
+            let index = -1;
+            if (/^\d+$/.test(target)) index = parseInt(target, 10) - 1;
+            else index = list.findIndex(x => x.trim() === target || x.includes(target));
+            if (index < 0 || index >= list.length) {
+                await reply('❌ That status was not found.');
+                return true;
+            }
+            const [removed] = list.splice(index, 1);
+            writeJson(GROUP_STATUS_FILE, store);
+            await reply(`🗑️ Removed from the group status:\n\n${removed}`);
+            return true;
+        }
+
+        await reply(
+            `📌 *GROUP STATUS*\n\n` +
+            (list.length ? list.map((x, i) => `*${i + 1}.* ${x}`).join('\n\n') : '_Nothing here yet._') +
+            `\n\n*${prefix}groupstatus add* (reply or type)\n*${prefix}groupstatus remove* (reply or number)`
+        );
+        return true;
+    }
+
+    /* ---------- MENU BUTTON ---------- */
+    if (command === 'menubutton' || command === 'menubuttonchat') {
+        const parsed = parseMenuButton(args);
+        if (!parsed.buttons.length) {
+            await reply(menuButtonHelp(prefix));
+            return true;
+        }
+        try {
+            const q = quotedInfo(m);
+            let image = null;
+            if (q && (q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
+                image = await downloadQuoted(EliteProTech, q).catch(() => null);
+            }
+            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image);
+        } catch (err) {
+            console.error('menubutton error:', err?.message || err);
+            await reply('❌ Failed to send the button message.');
+        }
+        return true;
+    }
+
+    /* ---------- VIEW ONCE TO DM ---------- */
+    if (command === 'vvdm' || command === 'vv2' || command === 'viewoncedm') {
+        const q = quotedInfo(m);
+        if (!q) {
+            await reply(`👁️ Reply to a view-once message with *${prefix}vvdm*.`);
+            return true;
+        }
+        try {
+            const target = ownerJid(EliteProTech);
+            await sendViewOnceCopy(EliteProTech, q, target, m);
+            await EliteProTech.sendMessage(m.chat, { text: '✅ View-once media recovered and sent to your DM.' }, { quoted: m });
+        } catch (err) {
+            console.error('vvdm error:', err?.message || err);
+            await reply('❌ Could not recover that view-once message.');
+        }
+        return true;
+    }
+
+
 
     if (command === 'chatbotname' || command === 'botname') {
         const current = readJson(NAME_FILE, {}).name || 'CBS-SCOVER';
@@ -328,11 +708,23 @@ function patchHandler(source) {
     code = code.split(`\n┣❍ *ɢʀᴏᴜᴘ:* ${GROUP_LINK}`).join('');
 
     // List the locally added commands in the menu.
-    if (code.includes('│𖥟╾ Antidelete\n')) {
-        code = code.split('│𖥟╾ Antidelete\n').join('│𖥟╾ Antidelete\n│𖥟╾ Antideletemessage\n│𖥟╾ Antideletegroup\n│𖥟╾ Chatbotname\n');
-    } else {
-        console.log('⚠️ Menu settings-commands patch target not found.');
-    }
+    const addAfter = (anchor, extra, label) => {
+        if (code.includes(anchor)) {
+            code = code.split(anchor).join(anchor + extra);
+        } else {
+            console.log(`⚠️ Menu ${label} patch target not found.`);
+        }
+    };
+
+    // SETTINGS
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n', 'settings-commands');
+    // GROUP
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    // DOWNLOADS
+    addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
+    // GENERAL
+    addAfter('│𖥟╾ Menu\n', '│𖥟╾ Menubuttonchat\n', 'general-commands');
+
     if (code.includes('│𖥟╾ Aivoice\n')) {
         code = code.split('│𖥟╾ Aivoice\n').join('│𖥟╾ Aivoice\n│𖥟╾ Aivoice-male\n│𖥟╾ Aivoice-female\n│𖥟╾ Aivoice-hausa\n│𖥟╾ Aivoice-hausa-female\n');
     } else {
@@ -371,6 +763,7 @@ function patchHandler(source) {
 
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
+        if (await handleButtonPress(EliteProTech, m)) return;
         if (await handleAiVoice(EliteProTech, m)) return;
         if (await handleExtraCommands(EliteProTech, m)) return;
 
