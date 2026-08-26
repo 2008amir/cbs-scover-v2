@@ -329,7 +329,11 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
     let reply;
     try {
         const started = Date.now();
-        reply = await global.geminiChat(prompt, combined);
+        const spoken = hasAudio
+            ? `${combined ? combined + '\n' : ''}The user sent a voice note. Listen to it and answer what they said, in their language. Never write out or mention the transcription — just reply naturally as if you heard them.`
+            : combined;
+        reply = await global.geminiChat(prompt, spoken, audioParts);
+
         // Pace the answer like a person typing it, minus the time already spent.
         const wait = humanDelay(reply.length) - (Date.now() - started);
         if (wait > 0) await new Promise(r => setTimeout(r, wait));
