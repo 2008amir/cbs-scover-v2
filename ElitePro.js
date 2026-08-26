@@ -159,9 +159,20 @@ async function handleAiVoice(EliteProTech, m) {
     text = text.slice(0, 900);
     if (!hausa && looksHausa(text)) hausa = true;
 
+    // "recording audio..." shows immediately and disappears the moment the
+    // voice note is delivered.
+    let recording = true;
+    const keepRecording = async () => {
+        while (recording) {
+            await EliteProTech.sendPresenceUpdate('recording', m.chat).catch(() => {});
+            await new Promise(r => setTimeout(r, 3000));
+        }
+    };
+
     try {
-        await EliteProTech.sendMessage(m.chat, { react: { text: '🎙️', key: m.key } }).catch(() => {});
+        await EliteProTech.sendPresenceUpdate('available', m.chat).catch(() => {});
         await EliteProTech.sendPresenceUpdate('recording', m.chat).catch(() => {});
+        keepRecording();
 
         const audio = await makeVoice(text, gender, hausa);
 
@@ -177,11 +188,15 @@ async function handleAiVoice(EliteProTech, m) {
         }
 
         await EliteProTech.sendMessage(m.chat, payload, { quoted: m });
-        await EliteProTech.sendMessage(m.chat, { react: { text: '✅', key: m.key } }).catch(() => {});
+        recording = false;
+        await EliteProTech.sendPresenceUpdate('paused', m.chat).catch(() => {});
     } catch (err) {
+        recording = false;
+        await EliteProTech.sendPresenceUpdate('paused', m.chat).catch(() => {});
         console.error('AIVoice Error:', err?.message || err);
         await reply('❌ Failed to generate the voice note. Please try again.').catch(() => {});
     }
+
 
     return true;
 }
