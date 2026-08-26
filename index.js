@@ -247,14 +247,14 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
-        if (!chatbotData.global && !typeEnabled && !chatEnabled) return;
-
-        // Private mode: the bot only talks in chats the owner explicitly enabled.
-        if (EliteProTech.public === false && !chatEnabled) return;
+        // "chatbot dm on" / "chatbot group on" work on their own — no per-user
+        // opt-in needed, and group chats are answered exactly like DMs.
+        if (chatbotData.global !== true && !typeEnabled && !chatEnabled) return;
 
         const text = extractText(mek);
         if (!text.trim()) return;
         if (text.trim().startsWith(global.prefix || '.')) return;
+
 
         const sender = mek.key.participant || from;
         const bufKey = `${from}|${sender}`;
