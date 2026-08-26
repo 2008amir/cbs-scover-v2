@@ -613,7 +613,9 @@ function patchSource(source) {
     const _jid = quoted?.key?.remoteJid
     const _by = mentions?.[0]
     const _sent = mentions?.[1]
-    try { await global.enforceAntiDeleteGroup(EliteProTech, _jid, _by, _sent, msg, quoted) } catch (e) { console.error(e?.message || e) }
+    let _handled = false
+    try { _handled = await global.enforceAntiDeleteGroup(EliteProTech, _jid, _by, _sent, msg, quoted) } catch (e) { console.error(e?.message || e) }
+    if (_handled) return
     return global.restoreDeletedMessage(EliteProTech, from, note, msg, quoted, mentions)
 }
 async function legacyRestoreMessage(EliteProTech, from, note, msg, quoted, mentions) {`
