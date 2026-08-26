@@ -13,8 +13,20 @@ global.groupLink = GROUP_LINK;
 global.channelLink = CHANNEL_LINK;
 
 // ===== Gemini chatbot =====
-const GEMINI_API_KEY = 'AIzaSyBnNHXQ5CrR_e5YrYnZnGa8_fqv34mc01c';
+// Multiple keys: if one fails (quota, invalid, rate limit) the next is tried
+// silently. Only when every key has failed does the chatbot give up.
+const GEMINI_API_KEYS = [
+    'AQ.Ab8RN6LvB5tvJ0UFa5OEhiBySoBw88w66PUy0eemRQdY5Z7nZA',
+    'AQ.Ab8RN6K0wycDkwHpCrO9nqZYPQWVRy7lRTvpR9UKmQ-JHT3HMQ',
+    'AQ.Ab8RN6KJX6HsIu7LuD0mpVOPhuh2cTn6BeOGKRRdYM3XqD6A6A',
+    'AQ.Ab8RN6IaWdBeFHrX7G9pvf57gbPPeaAuxkId_dyrF-6yPtcQiA',
+    'AQ.Ab8RN6JsYbC86DFizhsDaS4u1ozEcW7FFmcLGfzp0vs1z0c_dA',
+    'AIzaSyBnNHXQ5CrR_e5YrYnZnGa8_fqv34mc01c'
+];
+// Remember which key last worked so the next request starts there.
+global.geminiKeyIndex = global.geminiKeyIndex || 0;
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
 const ANTIDELETE_GROUP_FILE = path.join(__dirname, 'database', 'antideletegroup.json');
@@ -184,9 +196,17 @@ ${history}
 `.trim();
 };
 
-global.geminiChat = async function geminiChat(systemPrompt, userText) {
+// extraParts lets a voice note be sent straight to the model as inline audio,
+// so it "hears" the message and answers it. The transcript is never shown.
+global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts) {
+    const parts = [];
+    const text = String(userText || '').slice(0, 6000);
+    if (text) parts.push({ text });
+    if (Array.isArray(extraParts) && extraParts.length) parts.push(...extraParts);
+    if (!parts.length) parts.push({ text: '...' });
+
     const body = {
-        contents: [{ role: 'user', parts: [{ text: String(userText || '').slice(0, 6000) }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig: { temperature: 0.95, topP: 0.95, maxOutputTokens: 800 }
     };
     if (systemPrompt) {
@@ -194,22 +214,33 @@ global.geminiChat = async function geminiChat(systemPrompt, userText) {
     }
 
     let lastError = null;
-    for (const model of GEMINI_MODELS) {
-        try {
-            const { data } = await axios.post(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-                body,
-                { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-            );
-            const parts = data?.candidates?.[0]?.content?.parts || [];
-            const reply = parts.map(p => p?.text || '').join('').trim();
-            if (reply) return reply;
-            lastError = new Error('empty gemini response');
-        } catch (err) {
-            lastError = err;
+    const total = GEMINI_API_KEYS.length;
+    // Start from the key that worked last time, then roll over to the others.
+    for (let k = 0; k < total; k++) {
+        const keyIndex = (global.geminiKeyIndex + k) % total;
+        const key = GEMINI_API_KEYS[keyIndex];
+        for (const model of GEMINI_MODELS) {
+            try {
+                const { data } = await axios.post(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+                    body,
+                    { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
+                );
+                const out = (data?.candidates?.[0]?.content?.parts || [])
+                    .map(p => p?.text || '').join('').trim();
+                if (out) {
+                    global.geminiKeyIndex = keyIndex; // remember the working key
+                    return out;
+                }
+                lastError = new Error('empty gemini response');
+            } catch (err) {
+                // Silent fallback: move on to the next model, then the next key.
+                lastError = err;
+            }
         }
     }
-    console.error('Gemini error:', lastError?.response?.data || lastError?.message);
+    // Every key failed — stop here instead of retrying in a loop.
+    console.error('Gemini error (all keys failed):', lastError?.response?.data || lastError?.message);
     return 'I could not generate a reply at this time. Please try again.';
 };
 
@@ -217,6 +248,38 @@ function extractText(mek) {
     const msg = mek?.message || {};
     return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.videoMessage?.caption || '';
 }
+
+function voiceNode(mek) {
+    const msg = mek?.message || {};
+    const inner = msg.ephemeralMessage?.message || msg.viewOnceMessageV2?.message || msg;
+    return inner.audioMessage || null;
+}
+
+// Download a voice note and hand it to the model as audio. Nothing about the
+// transcription is ever sent to the chat — only the answer.
+async function voiceParts(EliteProTech, mek) {
+    const node = voiceNode(mek);
+    if (!node) return null;
+    try {
+        const { downloadContentFromMessage } = require('baileys');
+        const stream = await downloadContentFromMessage(node, 'audio');
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+        if (!buffer.length) return null;
+        return [{
+            inlineData: {
+                mimeType: node.mimetype ? String(node.mimetype).split(';')[0] : 'audio/ogg',
+                data: buffer.toString('base64')
+            }
+        }];
+    } catch (err) {
+        console.error('voice note read failed:', err?.message || err);
+        return null;
+    }
+}
+
+
 
 // Human typing rhythm: ~10-15 seconds for every 50 characters of the reply,
 // so short answers come back fast and long ones take proportionally longer.
@@ -228,19 +291,22 @@ function humanDelay(replyLength) {
 }
 
 
-async function generateAndSend(EliteProTech, from, sender, mek, texts) {
+async function generateAndSend(EliteProTech, from, sender, mek, texts, audioParts) {
     const combined = texts.join('\n').trim();
-    if (!combined) return;
+    const hasAudio = Array.isArray(audioParts) && audioParts.length > 0;
+    if (!combined && !hasAudio) return;
+
 
     global.userChats = global.userChats || {};
     global.userChatTimestamps = global.userChatTimestamps || {};
     global.userChats[sender] = global.userChats[sender] || [];
     global.userChatTimestamps[sender] = Date.now();
-    global.userChats[sender].push(`User: ${combined}`);
+    global.userChats[sender].push(`User: ${combined || '[voice note]'}`);
     while (global.userChats[sender].length > 20) global.userChats[sender].shift();
 
-    learnStyle(sender, combined);
-    rememberFacts(sender, combined);
+    learnStyle(sender, combined || '');
+    rememberFacts(sender, combined || '');
+
 
     const history = global.userChats[sender].join('\n').slice(-4000);
     const mode = chatbotMode(from);
@@ -263,7 +329,11 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
     let reply;
     try {
         const started = Date.now();
-        reply = await global.geminiChat(prompt, combined);
+        const spoken = hasAudio
+            ? `${combined ? combined + '\n' : ''}The user sent a voice note. Listen to it and answer what they said, in their language. Never write out or mention the transcription — just reply naturally as if you heard them.`
+            : combined;
+        reply = await global.geminiChat(prompt, spoken, audioParts);
+
         // Pace the answer like a person typing it, minus the time already spent.
         const wait = humanDelay(reply.length) - (Date.now() - started);
         if (wait > 0) await new Promise(r => setTimeout(r, wait));
@@ -303,7 +373,8 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         if (chatbotData.global !== true && !typeEnabled && !chatEnabled) return;
 
         const text = extractText(mek);
-        if (!text.trim()) return;
+        const isVoice = !!voiceNode(mek);
+        if (!text.trim() && !isVoice) return;
         if (text.trim().startsWith(global.prefix || '.')) return;
 
 
@@ -311,23 +382,31 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const bufKey = `${from}|${sender}`;
         const buf = (global.chatBuffers[bufKey] = global.chatBuffers[bufKey] || { texts: [], timer: null });
 
-        buf.texts.push(text.trim());
+        if (text.trim()) buf.texts.push(text.trim());
         buf.last = mek;
         if (buf.timer) clearTimeout(buf.timer);
 
         // Show "typing..." the moment the message arrives, like a real chat.
         EliteProTech.sendPresenceUpdate('composing', from).catch(() => {});
 
+        // A voice note is read straight into the model as audio (silent STT).
+        if (isVoice) {
+            const parts = await voiceParts(EliteProTech, mek);
+            if (parts) buf.audio = (buf.audio || []).concat(parts);
+        }
 
         // Wait a moment in case more messages of the same thought are coming.
         buf.timer = setTimeout(async () => {
             const texts = buf.texts.slice();
+            const audio = (buf.audio || []).slice();
             const last = buf.last;
             buf.texts = [];
+            buf.audio = [];
             buf.timer = null;
             try {
-                await generateAndSend(EliteProTech, from, sender, last, texts);
+                await generateAndSend(EliteProTech, from, sender, last, texts, audio);
             } catch (err) {
+
                 console.error('❌ Chatbot Error:', err?.message || err);
             }
         }, 1200);
