@@ -291,9 +291,11 @@ function humanDelay(replyLength) {
 }
 
 
-async function generateAndSend(EliteProTech, from, sender, mek, texts) {
+async function generateAndSend(EliteProTech, from, sender, mek, texts, audioParts) {
     const combined = texts.join('\n').trim();
-    if (!combined) return;
+    const hasAudio = Array.isArray(audioParts) && audioParts.length > 0;
+    if (!combined && !hasAudio) return;
+
 
     global.userChats = global.userChats || {};
     global.userChatTimestamps = global.userChatTimestamps || {};
