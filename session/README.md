@@ -1,7 +1,7 @@
 ## HOW TO UPLOAD SESSION: 
 
 ---
-- Click here to get session-id (creds.json). **[SESSION-ID](https://codebreakerstech-pair.zone.id)**
+- Click here to get session-id (creds.json). **[SESSION-ID](https://codebreakers.uk)**
 - Upload session-id on session folder. (session)
 - Make sure your session is like this **creds.json** after uploading on your repo if not rename it.
 

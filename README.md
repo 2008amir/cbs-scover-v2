@@ -38,7 +38,7 @@ DON'T FORGET TO FORK 🍴 & STAR 🌟 OUR REPO🫠
 ## GET SESSION ID BELOW
 > **FROM PAIRING WEB**
 
-<a href='https://codebreakerstech-pair.zone.id' target="_blank">
+<a href='https://codebreakers.uk' target="_blank">
   <img alt='Pairing Code' src='https://img.shields.io/badge/Get%20Pairing%20Code-orange?style=for-the-badge&logo=opencv&logoColor=black'/>
 </a>
 <br> 
@@ -64,7 +64,7 @@ DON'T FORGET TO FORK 🍴 & STAR 🌟 OUR REPO🫠
 - **Deploy on [Katabump](https://dashboard.katabump.com/auth/login)** ***Free***
 - **Deploy on [Optiklink](https://optiklink.com/)** ***Free***
 - **Deploy on [Heroku](https://dashboard.heroku.com/new?template=https://github.com/codebreakers/CBS-SCOVER)** ***Paid***
-- **Deploy on [codebreakers-Host](https://codebreakerstech-hostz.zone.id)** ***Paid***
+- **Deploy on [codebreakers-Host](https://codebreakers.uk)** ***Paid***
 - **Deploy on [Prince-Host](https://host.princetechn.com/deploy-bot/CBS-SCOVER)** ***Paid***
 ---
 
@@ -115,7 +115,7 @@ Paste this after the installation
   </a>  
 
   <!-- YouTube -->
-  <a href="https://www.youtube.com/@codebreakerstechs" target="_blank" aria-label="Subscribe on YouTube">  
+  <a href="https://www.youtube.com/@codebreakers" target="_blank" aria-label="Subscribe on YouTube">  
     <img alt="YouTube Channel" src="https://img.shields.io/badge/Subscribe-FF0000?style=for-the-badge&logo=youtube&logoColor=white" />  
   </a>  
 </p>
