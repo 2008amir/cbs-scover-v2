@@ -475,40 +475,55 @@ global.restoreDeletedMessage = async function restoreDeletedMessage(EliteProTech
    closest supported behaviour: when it is enabled for a group, the bot
    instantly re-posts the deleted message back into the group and warns the
    person who deleted it. */
-global.antiDeleteGroupEnabled = function antiDeleteGroupEnabled(jid) {
+// Returns 'public' (restore inside the group), 'private' (restore to the
+// owner's DM) or null when it is off for that group.
+global.antiDeleteGroupMode = function antiDeleteGroupMode(jid) {
     const data = readJsonSafe(ANTIDELETE_GROUP_FILE, { chats: {}, all: false });
-    return data.all === true || data.chats?.[jid] === true;
+    const value = data.chats?.[jid] ?? (data.all === true ? 'public' : null);
+    if (value === true) return 'public';
+    return value === 'public' || value === 'private' ? value : null;
+};
+
+global.antiDeleteGroupEnabled = function antiDeleteGroupEnabled(jid) {
+    return !!global.antiDeleteGroupMode(jid);
 };
 
 global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTech, remoteJid, deletedBy, sentBy, message, quoted) {
     try {
         if (!remoteJid || !String(remoteJid).endsWith('@g.us')) return false;
-        if (!global.antiDeleteGroupEnabled(remoteJid)) {
+        const mode = global.antiDeleteGroupMode(remoteJid);
+        if (!mode) {
             console.log('ℹ️ Anti-delete-group is off for', remoteJid);
             return false;
         }
+
+        const target = mode === 'private'
+            ? `${String(EliteProTech?.user?.id || OWNER_NUMBER).split(':')[0].split('@')[0]}@s.whatsapp.net`
+            : remoteJid;
 
         const warn =
             `🚫 *DELETED MESSAGE RESTORED*\n\n` +
             `✍️ Sent by: @${String(sentBy || '').split('@')[0]}\n` +
             `🗑️ Deleted by: @${String(deletedBy || '').split('@')[0]}\n` +
+            (mode === 'private' ? `👥 Group: ${remoteJid}\n` : '') +
             `💬 The message is below:`;
 
         await global.restoreDeletedMessage(
             EliteProTech,
-            remoteJid,
+            target,
             warn,
             message,
             quoted,
             [deletedBy, sentBy].filter(Boolean)
         );
-        console.log('✅ Anti-delete-group restored a message in', remoteJid);
+        console.log(`✅ Anti-delete-group (${mode}) restored a message from`, remoteJid);
         return true;
     } catch (err) {
         console.error('❌ Anti-delete-group error:', err?.message || err);
         return false;
     }
 };
+
 
 
 /* ============================ MENU ============================ */
