@@ -183,8 +183,7 @@ function patchSource(source) {
         console.log('⚠️ Anti-delete target-chat patch not found.');
     }
 
-    code = code.split('╭━━[ *× ANTI DELETE MESSAGES ×* ]━┉')
-        .join('╭━━[ *× ANTI DELETE MESSAGES ×* ]━┉');
+
 
     // Branding
     code = code
