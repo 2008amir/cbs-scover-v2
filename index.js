@@ -196,14 +196,17 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
     const history = global.userChats[sender].join('\n').slice(-4000);
     const prompt = global.buildChatbotPrompt(history, mek.pushName, sender);
 
-    // Typing indicator while the reply is being prepared.
+    // WhatsApp "typing..." (three dots) stays live the whole time the reply is
+    // being written, and is only cleared once the message is actually sent.
     let typing = true;
     const keepTyping = async () => {
         while (typing) {
             await EliteProTech.sendPresenceUpdate('composing', from).catch(() => {});
-            await new Promise(r => setTimeout(r, 4000));
+            await new Promise(r => setTimeout(r, 3000));
         }
     };
+    await EliteProTech.sendPresenceUpdate('available', from).catch(() => {});
+    await EliteProTech.sendPresenceUpdate('composing', from).catch(() => {});
     keepTyping();
 
     let reply;
@@ -213,17 +216,24 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
         // Pace the answer like a person typing it, minus the time already spent.
         const wait = humanDelay(reply.length) - (Date.now() - started);
         if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    } finally {
+    } catch (err) {
         typing = false;
         await EliteProTech.sendPresenceUpdate('paused', from).catch(() => {});
+        throw err;
     }
-
 
     global.userChats[sender].push(`Bot: ${reply}`);
     while (global.userChats[sender].length > 20) global.userChats[sender].shift();
 
-    await EliteProTech.sendMessage(from, { text: reply }, { quoted: mek });
+    try {
+        await EliteProTech.sendMessage(from, { text: reply }, { quoted: mek });
+    } finally {
+        // Drop the typing indicator the instant the message lands.
+        typing = false;
+        await EliteProTech.sendPresenceUpdate('paused', from).catch(() => {});
+    }
 }
+
 
 global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
     try {
@@ -253,6 +263,10 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         buf.texts.push(text.trim());
         buf.last = mek;
         if (buf.timer) clearTimeout(buf.timer);
+
+        // Show "typing..." the moment the message arrives, like a real chat.
+        EliteProTech.sendPresenceUpdate('composing', from).catch(() => {});
+
 
         // Wait a moment in case more messages of the same thought are coming.
         buf.timer = setTimeout(async () => {
