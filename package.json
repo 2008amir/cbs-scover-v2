@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "build:dev": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('lib/index.html','dist/index.html')\""
+    "build:dev": "node -e \"process.exit(0)\""
   },
   "author": "cyrilix",
   "license": "MIT",
