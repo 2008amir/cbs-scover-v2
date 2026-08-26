@@ -416,24 +416,34 @@ global.antiDeleteGroupEnabled = function antiDeleteGroupEnabled(jid) {
 };
 
 global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTech, remoteJid, deletedBy, sentBy, message, quoted) {
-    if (!remoteJid?.endsWith('@g.us')) return false;
-    if (!global.antiDeleteGroupEnabled(remoteJid)) return false;
+    try {
+        if (!remoteJid || !String(remoteJid).endsWith('@g.us')) return false;
+        if (!global.antiDeleteGroupEnabled(remoteJid)) {
+            console.log('ℹ️ Anti-delete-group is off for', remoteJid);
+            return false;
+        }
 
-    const warn =
-        `🚫 *ANTI DELETE GROUP MESSAGE IS ON*\n\n` +
-        `@${String(deletedBy || '').split('@')[0]}, you cannot delete @${String(sentBy || '').split('@')[0]}'s message here.\n` +
-        `The message has been restored below.`;
+        const warn =
+            `🚫 *ANTI DELETE GROUP MESSAGE IS ON*\n\n` +
+            `@${String(deletedBy || '').split('@')[0]}, you cannot delete @${String(sentBy || '').split('@')[0]}'s message here.\n` +
+            `The message has been restored below.`;
 
-    await global.restoreDeletedMessage(
-        EliteProTech,
-        remoteJid,
-        warn,
-        message,
-        quoted,
-        [deletedBy, sentBy].filter(Boolean)
-    );
-    return true;
+        await global.restoreDeletedMessage(
+            EliteProTech,
+            remoteJid,
+            warn,
+            message,
+            quoted,
+            [deletedBy, sentBy].filter(Boolean)
+        );
+        console.log('✅ Anti-delete-group restored a message in', remoteJid);
+        return true;
+    } catch (err) {
+        console.error('❌ Anti-delete-group error:', err?.message || err);
+        return false;
+    }
 };
+
 
 /* ============================ MENU ============================ */
 
