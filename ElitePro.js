@@ -751,47 +751,128 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
-    if (command === 'antideletegroup' || command === 'antideletegroupmessage') {
+    if (command.startsWith('antideletegroup')) {
         const opt = args.toLowerCase().trim();
         const config = readJson(ANTIDELETE_GROUP_FILE, { all: false, chats: {} });
         config.chats = config.chats || {};
         const isGroup = String(m.chat || '').endsWith('@g.us');
+        // .antideletegroup-public / .antideletegroup-private, or ".antideletegroup public enable"
+        let mode = command.includes('-public') ? 'public' : command.includes('-private') ? 'private' : null;
+        if (!mode && /^(public|private)/.test(opt)) mode = opt.split(/ +/)[0];
+        const action = opt.replace(/^(public|private)\s*/, '').trim();
+        const current = config.chats[m.chat];
+        const currentMode = current === true ? 'public' : current || null;
 
-        if (opt === 'enable' || opt === 'on') {
+        if (action === 'enable' || action === 'on' || (mode && !action)) {
             if (!isGroup) {
                 await reply('ℹ️ Use this command inside the group you want to protect.');
                 return true;
             }
-            config.chats[m.chat] = true;
+            config.chats[m.chat] = mode || 'public';
             writeJson(ANTIDELETE_GROUP_FILE, config);
-            // capture must be on for restoring to be possible
             const anti = readJson(ANTIDELETE_FILE, { enabled: false });
             anti.enabled = true;
             writeJson(ANTIDELETE_FILE, anti);
             await reply(
-                '✅ *Anti-delete group message enabled for this group.*\n\n' +
-                'Whenever anyone (member or admin) deletes a message for everyone, I instantly re-post it here and warn them that they cannot delete another member\u2019s message.\n\n' +
-                '⚠️ Note: WhatsApp itself controls the delete button inside the official app, so the warning appears here in the chat, not inside their app dialog.'
+                config.chats[m.chat] === 'private'
+                    ? '🔒 *Anti-delete group: PRIVATE.*\nDeleted messages in this group are restored to your DM only.'
+                    : '📢 *Anti-delete group: PUBLIC.*\nDeleted messages are restored inside this group, tagging who sent it and who deleted it.'
             );
             return true;
         }
-        if (opt === 'disable' || opt === 'off') {
+        if (action === 'disable' || action === 'off') {
             if (isGroup) delete config.chats[m.chat];
             config.all = false;
             writeJson(ANTIDELETE_GROUP_FILE, config);
-            await reply('❌ *Anti-delete group message disabled.*');
+            await reply('❌ *Anti-delete group disabled for this group.*');
             return true;
         }
-        const on = config.all === true || config.chats[m.chat] === true;
         await reply(
-            `🛡️ *ANTI DELETE GROUP MESSAGE*\n\nStatus here: ${on ? '✅ ENABLED' : '❌ DISABLED'}\n\n` +
-            `*${prefix}antideletegroup enable*\n*${prefix}antideletegroup disable*`
+            `🛡️ *ANTI DELETE GROUP*\n\nStatus here: ${currentMode ? `✅ ${currentMode.toUpperCase()}` : '❌ DISABLED'}\n\n` +
+            `*${prefix}antideletegroup-public enable* — restore inside the group\n` +
+            `*${prefix}antideletegroup-private enable* — restore to your DM\n` +
+            `*${prefix}antideletegroup-public disable* — turn it off`
+        );
+        return true;
+    }
+
+    /* ---------- CHATBOT SWITCHES + PERSONALITIES ---------- */
+    if (command === 'chatbot' || command === 'chatbot-friend' || command === 'chatbot-love') {
+        const store = readJson(CHATBOT_FILE, {});
+        store.chats = store.chats || {};
+        store.modes = store.modes || {};
+        const parts = args.toLowerCase().split(/ +/).filter(Boolean);
+        const persona = command === 'chatbot-friend' ? 'friend' : command === 'chatbot-love' ? 'love' : null;
+        const scope = parts[0] || '';
+        const state = parts[parts.length - 1];
+        const on = state === 'on' || state === 'enable';
+        const off = state === 'off' || state === 'disable';
+
+        if (persona) {
+            if (off) {
+                delete store.modes[m.chat];
+                writeJson(CHATBOT_FILE, store);
+                await reply(`✅ Back to the normal chatbot personality here.`);
+                return true;
+            }
+            store.modes[m.chat] = persona;
+            store.chats[m.chat] = true;
+            writeJson(CHATBOT_FILE, store);
+            await reply(
+                persona === 'love'
+                    ? '💖 *Chatbot-love enabled here.* I now chat with a warm, romantic, affectionate personality — it keeps learning from real human love talk online.'
+                    : '🤝 *Chatbot-friend enabled here.* I now chat like a close, loyal friend — relaxed, supportive and playful.'
+            );
+            return true;
+        }
+
+        if ((scope === 'here' || scope === 'this') && (on || off)) {
+            if (on) store.chats[m.chat] = true;
+            else delete store.chats[m.chat];
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON in this chat.' : '🤖 Chatbot is now OFF in this chat.');
+            return true;
+        }
+        if (scope === 'dm' && (on || off)) {
+            store.dm = on;
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON for all DMs.' : '🤖 Chatbot is now OFF for DMs.');
+            return true;
+        }
+        if (scope === 'group' && (on || off)) {
+            store.group = on;
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON in all groups.' : '🤖 Chatbot is now OFF in groups.');
+            return true;
+        }
+        if (scope === 'all' || scope === 'global') {
+            store.global = on;
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON everywhere.' : '🤖 Chatbot is now OFF everywhere.');
+            return true;
+        }
+        if (on || off) {
+            store.chats[m.chat] = on || undefined;
+            if (!on) delete store.chats[m.chat];
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON in this chat.' : '🤖 Chatbot is now OFF in this chat.');
+            return true;
+        }
+
+        const here = store.global || store.chats[m.chat] === true ||
+            (String(m.chat).endsWith('@g.us') ? store.group : store.dm);
+        await reply(
+            `🤖 *CHATBOT*\n\nHere: ${here ? '✅ ON' : '❌ OFF'}\nDMs: ${store.dm ? '✅' : '❌'}  |  Groups: ${store.group ? '✅' : '❌'}\n` +
+            `Personality here: *${store.modes[m.chat] || 'normal'}*\n\n` +
+            `*${prefix}chatbot dm on/off*\n*${prefix}chatbot group on/off*\n*${prefix}chatbot here on/off*\n` +
+            `*${prefix}chatbot all on/off*\n*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)`
         );
         return true;
     }
 
     return false;
 }
+
 
 /* ============================ HANDLER PATCHES ============================ */
 
