@@ -373,7 +373,8 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         if (chatbotData.global !== true && !typeEnabled && !chatEnabled) return;
 
         const text = extractText(mek);
-        if (!text.trim()) return;
+        const isVoice = !!voiceNode(mek);
+        if (!text.trim() && !isVoice) return;
         if (text.trim().startsWith(global.prefix || '.')) return;
 
 
@@ -381,23 +382,31 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const bufKey = `${from}|${sender}`;
         const buf = (global.chatBuffers[bufKey] = global.chatBuffers[bufKey] || { texts: [], timer: null });
 
-        buf.texts.push(text.trim());
+        if (text.trim()) buf.texts.push(text.trim());
         buf.last = mek;
         if (buf.timer) clearTimeout(buf.timer);
 
         // Show "typing..." the moment the message arrives, like a real chat.
         EliteProTech.sendPresenceUpdate('composing', from).catch(() => {});
 
+        // A voice note is read straight into the model as audio (silent STT).
+        if (isVoice) {
+            const parts = await voiceParts(EliteProTech, mek);
+            if (parts) buf.audio = (buf.audio || []).concat(parts);
+        }
 
         // Wait a moment in case more messages of the same thought are coming.
         buf.timer = setTimeout(async () => {
             const texts = buf.texts.slice();
+            const audio = (buf.audio || []).slice();
             const last = buf.last;
             buf.texts = [];
+            buf.audio = [];
             buf.timer = null;
             try {
-                await generateAndSend(EliteProTech, from, sender, last, texts);
+                await generateAndSend(EliteProTech, from, sender, last, texts, audio);
             } catch (err) {
+
                 console.error('❌ Chatbot Error:', err?.message || err);
             }
         }, 1200);
