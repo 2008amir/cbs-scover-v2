@@ -479,7 +479,47 @@ async function handleExtraCommands(EliteProTech, m) {
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
+    /* ---------- PROMOTE (no admin check on our side) ---------- */
+    if (command === 'promote' || command === 'promotewhennot') {
+        if (!isGroupChat) {
+            await reply('ℹ️ Use this command inside a group.');
+            return true;
+        }
+        const mentioned = m.msg?.contextInfo?.mentionedJid || m.mentionedJid || [];
+        const quotedSender = m.msg?.contextInfo?.participant;
+        const numeric = (args.match(/[0-9]{7,16}/g) || []).map(n => `${n}@s.whatsapp.net`);
+        const targets = [...new Set([...mentioned, ...numeric, ...(quotedSender ? [quotedSender] : [])])];
+        if (!targets.length) {
+            await reply(`👑 Tag, reply to, or type the number of the person:\n*${prefix}promote @user*`);
+            return true;
+        }
+        const ok = [];
+        const failed = [];
+        for (const jid of targets) {
+            let done = false;
+            for (let attempt = 0; attempt < 3 && !done; attempt++) {
+                try {
+                    await EliteProTech.groupParticipantsUpdate(m.chat, [jid], 'promote');
+                    done = true;
+                } catch (err) {
+                    if (attempt === 2) console.error('promote error:', err?.message || err);
+                    await new Promise(r => setTimeout(r, 700));
+                }
+            }
+            (done ? ok : failed).push(jid);
+        }
+        let text = '';
+        if (ok.length) text += `👑 Promoted to admin:\n${ok.map(j => '@' + j.split('@')[0]).join('\n')}\n`;
+        if (failed.length) {
+            text += `\n❌ WhatsApp refused the promotion for:\n${failed.map(j => '@' + j.split('@')[0]).join('\n')}\n\n` +
+                `Promotion is enforced by WhatsApp's servers — the bot itself must be a group admin. No client-side bypass exists.`;
+        }
+        await EliteProTech.sendMessage(m.chat, { text: text.trim(), mentions: targets }, { quoted: m });
+        return true;
+    }
+
     /* ---------- USERNAME (settings) ---------- */
+
     if (command === 'username' || command === 'setusername') {
         const current = readJson(USERNAME_FILE, {}).name || '';
         if (!args) {
@@ -719,7 +759,7 @@ function patchHandler(source) {
     // SETTINGS
     addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n│𖥟╾ Promotewhennot\n', 'group-commands');
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
     // GENERAL
