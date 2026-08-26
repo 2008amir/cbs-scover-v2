@@ -13,8 +13,20 @@ global.groupLink = GROUP_LINK;
 global.channelLink = CHANNEL_LINK;
 
 // ===== Gemini chatbot =====
-const GEMINI_API_KEY = 'AIzaSyBnNHXQ5CrR_e5YrYnZnGa8_fqv34mc01c';
+// Multiple keys: if one fails (quota, invalid, rate limit) the next is tried
+// silently. Only when every key has failed does the chatbot give up.
+const GEMINI_API_KEYS = [
+    'AQ.Ab8RN6LvB5tvJ0UFa5OEhiBySoBw88w66PUy0eemRQdY5Z7nZA',
+    'AQ.Ab8RN6K0wycDkwHpCrO9nqZYPQWVRy7lRTvpR9UKmQ-JHT3HMQ',
+    'AQ.Ab8RN6KJX6HsIu7LuD0mpVOPhuh2cTn6BeOGKRRdYM3XqD6A6A',
+    'AQ.Ab8RN6IaWdBeFHrX7G9pvf57gbPPeaAuxkId_dyrF-6yPtcQiA',
+    'AQ.Ab8RN6JsYbC86DFizhsDaS4u1ozEcW7FFmcLGfzp0vs1z0c_dA',
+    'AIzaSyBnNHXQ5CrR_e5YrYnZnGa8_fqv34mc01c'
+];
+// Remember which key last worked so the next request starts there.
+global.geminiKeyIndex = global.geminiKeyIndex || 0;
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
 const ANTIDELETE_GROUP_FILE = path.join(__dirname, 'database', 'antideletegroup.json');
