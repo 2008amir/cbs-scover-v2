@@ -328,11 +328,23 @@ function patchHandler(source) {
     code = code.split(`\n┣❍ *ɢʀᴏᴜᴘ:* ${GROUP_LINK}`).join('');
 
     // List the locally added commands in the menu.
-    if (code.includes('│𖥟╾ Antidelete\n')) {
-        code = code.split('│𖥟╾ Antidelete\n').join('│𖥟╾ Antidelete\n│𖥟╾ Antideletemessage\n│𖥟╾ Antideletegroup\n│𖥟╾ Chatbotname\n');
-    } else {
-        console.log('⚠️ Menu settings-commands patch target not found.');
-    }
+    const addAfter = (anchor, extra, label) => {
+        if (code.includes(anchor)) {
+            code = code.split(anchor).join(anchor + extra);
+        } else {
+            console.log(`⚠️ Menu ${label} patch target not found.`);
+        }
+    };
+
+    // SETTINGS
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n', 'settings-commands');
+    // GROUP
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    // DOWNLOADS
+    addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
+    // GENERAL
+    addAfter('│𖥟╾ Menu\n', '│𖥟╾ Menubuttonchat\n', 'general-commands');
+
     if (code.includes('│𖥟╾ Aivoice\n')) {
         code = code.split('│𖥟╾ Aivoice\n').join('│𖥟╾ Aivoice\n│𖥟╾ Aivoice-male\n│𖥟╾ Aivoice-female\n│𖥟╾ Aivoice-hausa\n│𖥟╾ Aivoice-hausa-female\n');
     } else {
