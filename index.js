@@ -301,11 +301,12 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
     global.userChatTimestamps = global.userChatTimestamps || {};
     global.userChats[sender] = global.userChats[sender] || [];
     global.userChatTimestamps[sender] = Date.now();
-    global.userChats[sender].push(`User: ${combined}`);
+    global.userChats[sender].push(`User: ${combined || '[voice note]'}`);
     while (global.userChats[sender].length > 20) global.userChats[sender].shift();
 
-    learnStyle(sender, combined);
-    rememberFacts(sender, combined);
+    learnStyle(sender, combined || '');
+    rememberFacts(sender, combined || '');
+
 
     const history = global.userChats[sender].join('\n').slice(-4000);
     const mode = chatbotMode(from);
