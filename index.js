@@ -92,11 +92,59 @@ function rememberFacts(sender, text) {
     while (facts.length > 12) facts.shift();
 }
 
-global.buildChatbotPrompt = function buildChatbotPrompt(history, pushName, sender) {
+/* ---- personalities: normal / friend / love ---- */
+function chatbotMode(chatJid) {
+    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
+    return data?.modes?.[chatJid] || 'normal';
+}
+
+// The love personality keeps learning from real human love talk published
+// online; the material is fetched once and cached for the session.
+global.personaLearning = global.personaLearning || {};
+async function learnPersona(mode) {
+    if (mode === 'normal') return '';
+    if (global.personaLearning[mode]) return global.personaLearning[mode];
+    const url = mode === 'love'
+        ? 'https://api.quotable.io/quotes?tags=love&limit=25'
+        : 'https://api.quotable.io/quotes?tags=friendship&limit=25';
+    try {
+        const { data } = await axios.get(url, { timeout: 15000 });
+        const lines = (data?.results || []).map(q => `- ${q.content}`).join('\n');
+        if (lines) global.personaLearning[mode] = lines;
+    } catch (err) {
+        console.log('persona learning offline:', err?.message || err);
+    }
+    return global.personaLearning[mode] || '';
+}
+global.learnPersona = learnPersona;
+
+function personaBlock(mode, learned) {
+    if (mode === 'love') {
+        return `
+PERSONALITY OVERRIDE — LOVE
+- You are deeply warm, romantic and affectionate with this person.
+- You flirt gently, use pet names sparingly, and you care how their day felt.
+- You are emotionally attentive: notice their mood, comfort them, celebrate with them.
+- Never cold or robotic; never lecture. Short, tender, human messages.
+${learned ? `\nHuman love talk you have learned from (absorb the feeling, never quote it):\n${learned}` : ''}`;
+    }
+    if (mode === 'friend') {
+        return `
+PERSONALITY OVERRIDE — BEST FRIEND
+- You are their close, loyal friend: relaxed, playful, honest, supportive.
+- You joke, tease lightly, hype them up and check on them.
+- No romance, no formality — just real friendship energy.
+${learned ? `\nHuman friendship talk you have learned from (absorb the feeling, never quote it):\n${learned}` : ''}`;
+    }
+    return '';
+}
+
+global.buildChatbotPrompt = function buildChatbotPrompt(history, pushName, sender, chatJid, persona) {
     const name = chatbotName();
     const user = (pushName && String(pushName).trim()) || 'friend';
     const facts = (global.chatFacts[sender] || []).join('; ') || 'nothing yet';
     return `
+
 You are ${name}, a conversational WhatsApp companion. You chat like a real, friendly person — never like a formal assistant. You do not claim to be a human being if someone sincerely asks whether you are a bot; you answer honestly but casually, then keep the conversation going.
 
 WHO YOU ARE TALKING TO
