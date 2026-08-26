@@ -763,6 +763,7 @@ function patchHandler(source) {
 
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
+        if (await handleButtonPress(EliteProTech, m)) return;
         if (await handleAiVoice(EliteProTech, m)) return;
         if (await handleExtraCommands(EliteProTech, m)) return;
 
