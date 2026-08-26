@@ -536,83 +536,73 @@ async function handleExtraCommands(EliteProTech, m) {
     }
 
     /* ---------- GROUP PROFILE PICTURE ---------- */
-    if (command === 'grouppp' || command === 'groupfullpp') {
+    if (command === 'grouppp' || command === 'groupfullpp' || command === 'setgrouppp') {
         if (!isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
             return true;
         }
-        const q = quotedInfo(m);
-        if (!q || !(q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
-            await reply(`🖼️ Reply to an image with *${prefix}${command}*.`);
+        const source = imageSource(m);
+        if (!source) {
+            await reply(`🖼️ Reply to an image (or send the image with the caption) using *${prefix}${command}*.`);
             return true;
         }
         try {
-            const buffer = await downloadQuoted(EliteProTech, q);
+            const raw = await downloadQuoted(EliteProTech, source);
             if (command === 'groupfullpp') {
-                await setFullProfilePicture(EliteProTech, m.chat, buffer);
-                await reply('✅ Group profile picture updated (full image, no crop).');
+                const padded = await padToSquare(raw);
+                await EliteProTech.updateProfilePicture(m.chat, padded);
+                await reply('✅ Group profile picture updated — full image, nothing cropped out.');
             } else {
-                await EliteProTech.updateProfilePicture(m.chat, buffer);
+                const cropped = await cropSquare(raw);
+                await EliteProTech.updateProfilePicture(m.chat, cropped);
                 await reply('✅ Group profile picture updated (cropped).');
             }
         } catch (err) {
             console.error('grouppp error:', err?.message || err);
-            await reply('❌ Failed to update the group picture. Make sure I am a group admin.');
+            await reply(`❌ Could not set the group picture.\n${err?.message || err}\n\nI must be a group admin to change it.`);
         }
         return true;
     }
 
-    /* ---------- GROUP STATUS ---------- */
-    if (command === 'groupstatus') {
-        if (!isGroupChat) {
+    /* ---------- GROUP STATUS (real WhatsApp status) ---------- */
+    if (command === 'groupstatus' || command === 'addstatus' || command === 'mystatus') {
+        const groupMode = command === 'groupstatus';
+        if (groupMode && !isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
             return true;
         }
-        const store = readJson(GROUP_STATUS_FILE, {});
-        const list = store[m.chat] = store[m.chat] || [];
         const sub = args.toLowerCase().split(/ +/)[0];
-        const rest = args.slice(sub.length).trim();
-        const q = quotedInfo(m);
-        const quotedText = q ? (q.message.conversation || q.message.extendedTextMessage?.text || q.message.imageMessage?.caption || q.message.videoMessage?.caption || '') : '';
+        const rest = ['add', 'post', 'upload'].includes(sub) ? args.slice(sub.length).trim() : args.trim();
 
-        if (sub === 'add') {
-            const entry = (rest || quotedText).trim();
-            if (!entry) {
-                await reply(`➕ Reply to what you want to add, or type it:\n*${prefix}groupstatus add <text>*`);
+        try {
+            const audience = groupMode
+                ? await groupAudience(EliteProTech, m.chat)
+                : [ownerJid(EliteProTech), m.sender || m.chat].filter(Boolean);
+
+            const content = await buildStatusContent(EliteProTech, m, rest);
+            if (!content) {
+                await reply(
+                    `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
+                    `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
+                    `or type *${prefix}${command} add <your text>*.`
+                );
                 return true;
             }
-            list.push(entry.slice(0, 1000));
-            writeJson(GROUP_STATUS_FILE, store);
-            await reply(`✅ Added to the group status.\n\n*${list.length}.* ${entry}`);
-            return true;
+
+            await EliteProTech.sendMessage('status@broadcast', content, {
+                backgroundColor: '#0a0a0a',
+                font: 3,
+                statusJidList: audience,
+                broadcast: true
+            });
+            await reply(`✅ Posted to ${groupMode ? 'the group status' : 'your status'} (${audience.length} viewers).`);
+        } catch (err) {
+            console.error('groupstatus error:', err?.message || err);
+            await reply(`❌ Could not post the status.\n${err?.message || err}`);
         }
-
-        if (sub === 'remove' || sub === 'delete' || sub === 'del') {
-            const target = (rest || quotedText).trim();
-            if (!target) {
-                await reply(`➖ Reply to the status you want to remove with *${prefix}groupstatus remove*, or pass its number.`);
-                return true;
-            }
-            let index = -1;
-            if (/^\d+$/.test(target)) index = parseInt(target, 10) - 1;
-            else index = list.findIndex(x => x.trim() === target || x.includes(target));
-            if (index < 0 || index >= list.length) {
-                await reply('❌ That status was not found.');
-                return true;
-            }
-            const [removed] = list.splice(index, 1);
-            writeJson(GROUP_STATUS_FILE, store);
-            await reply(`🗑️ Removed from the group status:\n\n${removed}`);
-            return true;
-        }
-
-        await reply(
-            `📌 *GROUP STATUS*\n\n` +
-            (list.length ? list.map((x, i) => `*${i + 1}.* ${x}`).join('\n\n') : '_Nothing here yet._') +
-            `\n\n*${prefix}groupstatus add* (reply or type)\n*${prefix}groupstatus remove* (reply or number)`
-        );
         return true;
     }
+
 
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
