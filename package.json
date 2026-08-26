@@ -5,7 +5,9 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node index.js",
+    "build:dev": "node -e \"process.exit(0)\""
   },
   "author": "cyrilix",
   "license": "MIT",
