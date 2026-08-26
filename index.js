@@ -169,12 +169,15 @@ function extractText(mek) {
     return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.videoMessage?.caption || '';
 }
 
-// Human typing rhythm: base 10-15s, longer for longer answers, capped.
+// Human typing rhythm: ~10-15 seconds for every 50 characters of the reply,
+// so short answers come back fast and long ones take proportionally longer.
 function humanDelay(replyLength) {
-    const base = 10000 + Math.random() * 5000;
-    const extra = Math.min(replyLength * 55, 15000);
-    return Math.round(base + extra);
+    const perChunk = 10000 + Math.random() * 5000; // 10-15s per 50 characters
+    const chunks = Math.max(replyLength, 1) / 50;
+    const delay = perChunk * chunks;
+    return Math.round(Math.min(Math.max(delay, 1500), 30000));
 }
+
 
 async function generateAndSend(EliteProTech, from, sender, mek, texts) {
     const combined = texts.join('\n').trim();
@@ -205,13 +208,16 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
 
     let reply;
     try {
+        const started = Date.now();
         reply = await global.geminiChat(prompt, combined);
-        // Pace the answer like a person actually typing it.
-        await new Promise(r => setTimeout(r, humanDelay(reply.length)));
+        // Pace the answer like a person typing it, minus the time already spent.
+        const wait = humanDelay(reply.length) - (Date.now() - started);
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
     } finally {
         typing = false;
         await EliteProTech.sendPresenceUpdate('paused', from).catch(() => {});
     }
+
 
     global.userChats[sender].push(`Bot: ${reply}`);
     while (global.userChats[sender].length > 20) global.userChats[sender].shift();
@@ -259,7 +265,7 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
             } catch (err) {
                 console.error('❌ Chatbot Error:', err?.message || err);
             }
-        }, 3500);
+        }, 1200);
     } catch (err) {
         console.error('❌ Chatbot Error:', err?.message || err);
     }
@@ -280,34 +286,78 @@ const DELETED_CONTEXT = {
 };
 
 function unwrapViewOnce(msg) {
-    // .vv style recovery for view-once media that was deleted.
-    const inner =
-        msg?.viewOnceMessageV2Extension?.message ||
-        msg?.viewOnceMessageV2?.message ||
-        msg?.viewOnceMessage?.message;
-    if (!inner) return { msg, viewOnce: false };
-    const clean = { ...inner };
-    for (const k of Object.keys(clean)) {
-        if (clean[k] && typeof clean[k] === 'object') clean[k].viewOnce = false;
+    // .vv style recovery: peel every wrapper WhatsApp puts around view-once
+    // and disappearing media until the real media node is exposed.
+    let current = msg || {};
+    let viewOnce = false;
+    for (let i = 0; i < 5; i++) {
+        const inner =
+            current?.viewOnceMessageV2Extension?.message ||
+            current?.viewOnceMessageV2?.message ||
+            current?.viewOnceMessage?.message ||
+            current?.ephemeralMessage?.message ||
+            current?.documentWithCaptionMessage?.message;
+        if (!inner) break;
+        if (!current.ephemeralMessage && !current.documentWithCaptionMessage) viewOnce = true;
+        current = inner;
     }
-    return { msg: clean, viewOnce: true };
+    const clean = { ...current };
+    for (const k of Object.keys(clean)) {
+        if (clean[k] && typeof clean[k] === 'object') {
+            clean[k] = { ...clean[k], viewOnce: false };
+            if (clean[k].viewOnce !== undefined) clean[k].viewOnce = false;
+        }
+    }
+    if (!viewOnce) {
+        viewOnce = Object.values(current).some(v => v && typeof v === 'object' && v.viewOnce === true);
+    }
+    return { msg: clean, viewOnce };
 }
 
 global.restoreDeletedMessage = async function restoreDeletedMessage(EliteProTech, from, note, message, quoted, mentions) {
-    const { downloadMediaMessage } = require('baileys');
+    const baileys = require('baileys');
+    const { downloadMediaMessage, downloadContentFromMessage } = baileys;
 
     const { msg, viewOnce } = unwrapViewOnce(message);
-    const header = `${DELETED_MARK}${viewOnce ? ' (view once — recovered with .vv)' : ''}\n${note}\n`;
+    const header = `${DELETED_MARK}${viewOnce ? ' (view once — recovered)' : ''}\n${note}\n`;
     const send = (content) =>
         EliteProTech.sendMessage(from, { ...content, mentions, contextInfo: { ...DELETED_CONTEXT, mentionedJid: mentions } });
 
-    const media = () =>
-        downloadMediaMessage(
-            { key: quoted?.key, message: msg },
-            'buffer',
-            {},
-            { reuploadRequest: EliteProTech.updateMediaMessage }
-        );
+    const MEDIA_TYPES = {
+        imageMessage: 'image',
+        videoMessage: 'video',
+        audioMessage: 'audio',
+        stickerMessage: 'sticker',
+        documentMessage: 'document'
+    };
+
+    const media = async () => {
+        const attempts = [
+            () => downloadMediaMessage({ key: quoted?.key, message: msg }, 'buffer', {}, { reuploadRequest: EliteProTech.updateMediaMessage }),
+            () => downloadMediaMessage({ key: quoted?.key, message }, 'buffer', {}, { reuploadRequest: EliteProTech.updateMediaMessage }),
+            async () => {
+                const type = Object.keys(MEDIA_TYPES).find(k => msg[k]);
+                if (!type) throw new Error('no media node');
+                const stream = await downloadContentFromMessage(msg[type], MEDIA_TYPES[type]);
+                const chunks = [];
+                for await (const chunk of stream) chunks.push(chunk);
+                return Buffer.concat(chunks);
+            }
+        ];
+        let lastErr;
+        for (const attempt of attempts) {
+            try {
+                const buf = await attempt();
+                if (buf && buf.length) return buf;
+                lastErr = new Error('empty media buffer');
+            } catch (err) {
+                lastErr = err;
+                console.error('Media recovery attempt failed:', err?.message || err);
+            }
+        }
+        throw lastErr || new Error('media recovery failed');
+    };
+
 
     try {
         const text = msg.conversation || msg.extendedTextMessage?.text;
@@ -366,24 +416,34 @@ global.antiDeleteGroupEnabled = function antiDeleteGroupEnabled(jid) {
 };
 
 global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTech, remoteJid, deletedBy, sentBy, message, quoted) {
-    if (!remoteJid?.endsWith('@g.us')) return false;
-    if (!global.antiDeleteGroupEnabled(remoteJid)) return false;
+    try {
+        if (!remoteJid || !String(remoteJid).endsWith('@g.us')) return false;
+        if (!global.antiDeleteGroupEnabled(remoteJid)) {
+            console.log('ℹ️ Anti-delete-group is off for', remoteJid);
+            return false;
+        }
 
-    const warn =
-        `🚫 *ANTI DELETE GROUP MESSAGE IS ON*\n\n` +
-        `@${String(deletedBy || '').split('@')[0]}, you cannot delete @${String(sentBy || '').split('@')[0]}'s message here.\n` +
-        `The message has been restored below.`;
+        const warn =
+            `🚫 *ANTI DELETE GROUP MESSAGE IS ON*\n\n` +
+            `@${String(deletedBy || '').split('@')[0]}, you cannot delete @${String(sentBy || '').split('@')[0]}'s message here.\n` +
+            `The message has been restored below.`;
 
-    await global.restoreDeletedMessage(
-        EliteProTech,
-        remoteJid,
-        warn,
-        message,
-        quoted,
-        [deletedBy, sentBy].filter(Boolean)
-    );
-    return true;
+        await global.restoreDeletedMessage(
+            EliteProTech,
+            remoteJid,
+            warn,
+            message,
+            quoted,
+            [deletedBy, sentBy].filter(Boolean)
+        );
+        console.log('✅ Anti-delete-group restored a message in', remoteJid);
+        return true;
+    } catch (err) {
+        console.error('❌ Anti-delete-group error:', err?.message || err);
+        return false;
+    }
 };
+
 
 /* ============================ MENU ============================ */
 
@@ -407,36 +467,44 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
         }
     ];
 
+    // 1) Always deliver the menu itself first — plain image + caption always
+    //    renders on every WhatsApp version, so the menu can never go missing.
+    const links = `\n\n👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}`;
     try {
-        const { generateWAMessageFromContent, prepareWAMessageMedia, proto } = require('baileys');
-        const media = await prepareWAMessageMedia(
-            { image: typeof image === 'string' ? { url: image } : image },
-            { upload: EliteProTech.waUploadToServer }
+        await EliteProTech.sendMessage(
+            m.chat,
+            { image: typeof image === 'string' ? { url: image } : image, caption: `${caption}${links}` },
+            { quoted: m }
         );
+    } catch (err) {
+        console.error('Menu image failed, sending text menu:', err?.message || err);
+        await EliteProTech.sendMessage(m.chat, { text: `${caption}${links}` }, { quoted: m }).catch(() => {});
+    }
 
+    // 2) Then try to add tappable buttons underneath (ignored if unsupported).
+    try {
+        const { generateWAMessageFromContent, proto } = require('baileys');
         const msg = generateWAMessageFromContent(
             m.chat,
             proto.Message.fromObject({
-                interactiveMessage: proto.Message.InteractiveMessage.create({
-                    body: proto.Message.InteractiveMessage.Body.create({ text: caption }),
-                    footer: proto.Message.InteractiveMessage.Footer.create({ text: `> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ` }),
-                    header: proto.Message.InteractiveMessage.Header.create({ hasMediaAttachment: true, ...media }),
-                    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
-                })
+                viewOnceMessage: {
+                    message: {
+                        interactiveMessage: proto.Message.InteractiveMessage.create({
+                            body: proto.Message.InteractiveMessage.Body.create({ text: '📌 Quick links' }),
+                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
+                        })
+                    }
+                }
             }),
-            { userJid: m.sender, quoted: m }
+            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
         );
-
-        return EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
+        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
     } catch (err) {
-        console.error('Menu buttons failed, sending plain menu:', err?.message || err);
-        return EliteProTech.sendMessage(
-            m.chat,
-            { image, caption: `${caption}\n\n👥 Group: ${GROUP_LINK}\n📢 Channel: ${CHANNEL_LINK}` },
-            { quoted: m }
-        );
+        console.error('Menu buttons unavailable:', err?.message || err);
     }
 };
+
 
 /* ============================ SOURCE PATCHES ============================ */
 
