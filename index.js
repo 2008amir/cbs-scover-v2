@@ -243,7 +243,9 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
     rememberFacts(sender, combined);
 
     const history = global.userChats[sender].join('\n').slice(-4000);
-    const prompt = global.buildChatbotPrompt(history, mek.pushName, sender);
+    const mode = chatbotMode(from);
+    const persona = personaBlock(mode, await learnPersona(mode));
+    const prompt = global.buildChatbotPrompt(history, mek.pushName, sender, from, persona);
 
     // WhatsApp "typing..." (three dots) stays live the whole time the reply is
     // being written, and is only cleared once the message is actually sent.
