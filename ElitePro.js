@@ -234,6 +234,143 @@ async function handleExtraCommands(EliteProTech, m) {
     const command = body.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
     const args = body.slice(prefix.length + command.length).trim();
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
+    const isGroupChat = String(m.chat || '').endsWith('@g.us');
+
+    /* ---------- USERNAME (settings) ---------- */
+    if (command === 'username' || command === 'setusername') {
+        const current = readJson(USERNAME_FILE, {}).name || '';
+        if (!args) {
+            await reply(
+                `👤 *USERNAME*\n\nCurrent: *${current || 'not set'}*\n\nSet it with:\n*${prefix}username <your name>*`
+            );
+            return true;
+        }
+        const name = args.slice(0, 40);
+        writeJson(USERNAME_FILE, { name });
+        global.username = name;
+        await reply(`✅ Username set to *${name}*.`);
+        return true;
+    }
+
+    /* ---------- GROUP PROFILE PICTURE ---------- */
+    if (command === 'grouppp' || command === 'groupfullpp') {
+        if (!isGroupChat) {
+            await reply('ℹ️ Use this command inside a group.');
+            return true;
+        }
+        const q = quotedInfo(m);
+        if (!q || !(q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
+            await reply(`🖼️ Reply to an image with *${prefix}${command}*.`);
+            return true;
+        }
+        try {
+            const buffer = await downloadQuoted(EliteProTech, q);
+            if (command === 'groupfullpp') {
+                await setFullProfilePicture(EliteProTech, m.chat, buffer);
+                await reply('✅ Group profile picture updated (full image, no crop).');
+            } else {
+                await EliteProTech.updateProfilePicture(m.chat, buffer);
+                await reply('✅ Group profile picture updated (cropped).');
+            }
+        } catch (err) {
+            console.error('grouppp error:', err?.message || err);
+            await reply('❌ Failed to update the group picture. Make sure I am a group admin.');
+        }
+        return true;
+    }
+
+    /* ---------- GROUP STATUS ---------- */
+    if (command === 'groupstatus') {
+        if (!isGroupChat) {
+            await reply('ℹ️ Use this command inside a group.');
+            return true;
+        }
+        const store = readJson(GROUP_STATUS_FILE, {});
+        const list = store[m.chat] = store[m.chat] || [];
+        const sub = args.toLowerCase().split(/ +/)[0];
+        const rest = args.slice(sub.length).trim();
+        const q = quotedInfo(m);
+        const quotedText = q ? (q.message.conversation || q.message.extendedTextMessage?.text || q.message.imageMessage?.caption || q.message.videoMessage?.caption || '') : '';
+
+        if (sub === 'add') {
+            const entry = (rest || quotedText).trim();
+            if (!entry) {
+                await reply(`➕ Reply to what you want to add, or type it:\n*${prefix}groupstatus add <text>*`);
+                return true;
+            }
+            list.push(entry.slice(0, 1000));
+            writeJson(GROUP_STATUS_FILE, store);
+            await reply(`✅ Added to the group status.\n\n*${list.length}.* ${entry}`);
+            return true;
+        }
+
+        if (sub === 'remove' || sub === 'delete' || sub === 'del') {
+            const target = (rest || quotedText).trim();
+            if (!target) {
+                await reply(`➖ Reply to the status you want to remove with *${prefix}groupstatus remove*, or pass its number.`);
+                return true;
+            }
+            let index = -1;
+            if (/^\d+$/.test(target)) index = parseInt(target, 10) - 1;
+            else index = list.findIndex(x => x.trim() === target || x.includes(target));
+            if (index < 0 || index >= list.length) {
+                await reply('❌ That status was not found.');
+                return true;
+            }
+            const [removed] = list.splice(index, 1);
+            writeJson(GROUP_STATUS_FILE, store);
+            await reply(`🗑️ Removed from the group status:\n\n${removed}`);
+            return true;
+        }
+
+        await reply(
+            `📌 *GROUP STATUS*\n\n` +
+            (list.length ? list.map((x, i) => `*${i + 1}.* ${x}`).join('\n\n') : '_Nothing here yet._') +
+            `\n\n*${prefix}groupstatus add* (reply or type)\n*${prefix}groupstatus remove* (reply or number)`
+        );
+        return true;
+    }
+
+    /* ---------- MENU BUTTON ---------- */
+    if (command === 'menubutton' || command === 'menubuttonchat') {
+        const parsed = parseMenuButton(args);
+        if (!parsed.buttons.length) {
+            await reply(menuButtonHelp(prefix));
+            return true;
+        }
+        try {
+            const q = quotedInfo(m);
+            let image = null;
+            if (q && (q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
+                image = await downloadQuoted(EliteProTech, q).catch(() => null);
+            }
+            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image);
+        } catch (err) {
+            console.error('menubutton error:', err?.message || err);
+            await reply('❌ Failed to send the button message.');
+        }
+        return true;
+    }
+
+    /* ---------- VIEW ONCE TO DM ---------- */
+    if (command === 'vvdm' || command === 'vv2' || command === 'viewoncedm') {
+        const q = quotedInfo(m);
+        if (!q) {
+            await reply(`👁️ Reply to a view-once message with *${prefix}vvdm*.`);
+            return true;
+        }
+        try {
+            const target = ownerJid(EliteProTech);
+            await sendViewOnceCopy(EliteProTech, q, target, m);
+            await EliteProTech.sendMessage(m.chat, { text: '✅ View-once media recovered and sent to your DM.' }, { quoted: m });
+        } catch (err) {
+            console.error('vvdm error:', err?.message || err);
+            await reply('❌ Could not recover that view-once message.');
+        }
+        return true;
+    }
+
+
 
     if (command === 'chatbotname' || command === 'botname') {
         const current = readJson(NAME_FILE, {}).name || 'CBS-SCOVER';
