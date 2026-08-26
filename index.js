@@ -548,8 +548,46 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
         }
     ];
 
-    // 1) Always deliver the menu itself first — plain image + caption always
-    //    renders on every WhatsApp version, so the menu can never go missing.
+    // 1) Preferred: one interactive message — menu image, menu text and the
+    //    group/channel as real tappable buttons (no raw links in the text).
+    try {
+        const {
+            generateWAMessageFromContent,
+            prepareWAMessageMedia,
+            proto
+        } = require('baileys');
+
+        const media = await prepareWAMessageMedia(
+            { image: typeof image === 'string' ? { url: image } : image },
+            { upload: EliteProTech.waUploadToServer }
+        );
+
+        const msg = generateWAMessageFromContent(
+            m.chat,
+            proto.Message.fromObject({
+                viewOnceMessage: {
+                    message: {
+                        interactiveMessage: proto.Message.InteractiveMessage.create({
+                            body: proto.Message.InteractiveMessage.Body.create({ text: caption }),
+                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+                            header: proto.Message.InteractiveMessage.Header.create({
+                                hasMediaAttachment: true,
+                                ...media
+                            }),
+                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
+                        })
+                    }
+                }
+            }),
+            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
+        );
+        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
+        return;
+    } catch (err) {
+        console.error('Interactive menu unavailable, falling back:', err?.message || err);
+    }
+
+    // 2) Fallback for clients that cannot render buttons.
     const links = `\n\n👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}`;
     try {
         await EliteProTech.sendMessage(
@@ -562,28 +600,6 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
         await EliteProTech.sendMessage(m.chat, { text: `${caption}${links}` }, { quoted: m }).catch(() => {});
     }
 
-    // 2) Then try to add tappable buttons underneath (ignored if unsupported).
-    try {
-        const { generateWAMessageFromContent, proto } = require('baileys');
-        const msg = generateWAMessageFromContent(
-            m.chat,
-            proto.Message.fromObject({
-                viewOnceMessage: {
-                    message: {
-                        interactiveMessage: proto.Message.InteractiveMessage.create({
-                            body: proto.Message.InteractiveMessage.Body.create({ text: '📌 Quick links' }),
-                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
-                        })
-                    }
-                }
-            }),
-            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
-        );
-        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
-    } catch (err) {
-        console.error('Menu buttons unavailable:', err?.message || err);
-    }
 };
 
 
