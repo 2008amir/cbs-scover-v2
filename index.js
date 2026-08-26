@@ -264,6 +264,10 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         buf.last = mek;
         if (buf.timer) clearTimeout(buf.timer);
 
+        // Show "typing..." the moment the message arrives, like a real chat.
+        EliteProTech.sendPresenceUpdate('composing', from).catch(() => {});
+
+
         // Wait a moment in case more messages of the same thought are coming.
         buf.timer = setTimeout(async () => {
             const texts = buf.texts.slice();
