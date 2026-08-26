@@ -206,6 +206,7 @@ async function handleAiVoice(EliteProTech, m) {
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
 const ANTIDELETE_FILE = path.join(__dirname, 'database', 'antidelete.json');
 const ANTIDELETE_GROUP_FILE = path.join(__dirname, 'database', 'antideletegroup.json');
+const CHATBOT_FILE = path.join(__dirname, 'database', 'chatbot.json');
 
 function readJson(file, fallback) {
     try {
@@ -319,15 +320,85 @@ async function downloadQuoted(EliteProTech, q) {
     throw lastErr || new Error('download failed');
 }
 
-// Full (uncropped) group picture: WhatsApp only crops when the client asks it
-// to, so the raw JPEG is uploaded directly.
-async function setFullProfilePicture(EliteProTech, jid, buffer) {
-    await EliteProTech.query({
-        tag: 'iq',
-        attrs: { to: jid, type: 'set', xmlns: 'w:profile:picture' },
-        content: [{ tag: 'picture', attrs: { type: 'image' }, content: buffer }]
-    });
+// Image the command should work on: a replied image, or the image the command
+// was sent as a caption of.
+function imageSource(m) {
+    const q = quotedInfo(m);
+    if (q && unwrap(q.message).imageMessage) return q;
+    const own = unwrap(m.message || {});
+    if (own.imageMessage) return { message: m.message, key: m.key };
+    return null;
 }
+
+async function cropSquare(buffer) {
+    const Jimp = require('jimp');
+    const img = await Jimp.read(buffer);
+    const side = Math.min(img.getWidth(), img.getHeight());
+    return img
+        .crop((img.getWidth() - side) / 2, (img.getHeight() - side) / 2, side, side)
+        .resize(640, 640)
+        .quality(90)
+        .getBufferAsync(Jimp.MIME_JPEG);
+}
+
+// WhatsApp always displays a square profile picture, so "full, no crop" means
+// fitting the whole image inside a square canvas instead of cutting it.
+async function padToSquare(buffer) {
+    const Jimp = require('jimp');
+    const img = await Jimp.read(buffer);
+    const side = Math.max(img.getWidth(), img.getHeight());
+    const canvas = new Jimp(side, side, 0x000000ff);
+    const fitted = img.clone().contain(side, side);
+    canvas.composite(fitted, 0, 0);
+    return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
+}
+
+async function groupAudience(EliteProTech, jid) {
+    try {
+        const meta = await EliteProTech.groupMetadata(jid);
+        return (meta?.participants || []).map(p => p.id || p.jid).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+// Builds a real WhatsApp status payload from a replied message (text, image,
+// video or audio) or from typed text.
+async function buildStatusContent(EliteProTech, m, typedText) {
+    const q = quotedInfo(m);
+    const quoted = q ? unwrap(q.message) : {};
+
+    if (q && (quoted.imageMessage || quoted.videoMessage || quoted.audioMessage)) {
+        const buffer = await downloadQuoted(EliteProTech, q);
+        if (quoted.imageMessage) {
+            return { image: buffer, caption: typedText || quoted.imageMessage.caption || '' };
+        }
+        if (quoted.videoMessage) {
+            return { video: buffer, caption: typedText || quoted.videoMessage.caption || '' };
+        }
+        return {
+            audio: buffer,
+            mimetype: quoted.audioMessage.mimetype || 'audio/mp4',
+            ptt: !!quoted.audioMessage.ptt
+        };
+    }
+
+    const own = unwrap(m.message || {});
+    if (own.imageMessage || own.videoMessage) {
+        const buffer = await downloadQuoted(EliteProTech, { message: m.message, key: m.key });
+        return own.imageMessage
+            ? { image: buffer, caption: typedText }
+            : { video: buffer, caption: typedText };
+    }
+
+    const text =
+        typedText ||
+        quoted.conversation ||
+        quoted.extendedTextMessage?.text ||
+        '';
+    return text.trim() ? { text: text.trim() } : null;
+}
+
 
 async function sendViewOnceCopy(EliteProTech, q, target, m) {
     const message = unwrap(q.message);
@@ -480,7 +551,7 @@ async function handleExtraCommands(EliteProTech, m) {
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
     /* ---------- PROMOTE (no admin check on our side) ---------- */
-    if (command === 'promote' || command === 'promotewhennot') {
+    if (command === 'promote') {
         if (!isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
             return true;
@@ -536,83 +607,73 @@ async function handleExtraCommands(EliteProTech, m) {
     }
 
     /* ---------- GROUP PROFILE PICTURE ---------- */
-    if (command === 'grouppp' || command === 'groupfullpp') {
+    if (command === 'grouppp' || command === 'groupfullpp' || command === 'setgrouppp') {
         if (!isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
             return true;
         }
-        const q = quotedInfo(m);
-        if (!q || !(q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
-            await reply(`🖼️ Reply to an image with *${prefix}${command}*.`);
+        const source = imageSource(m);
+        if (!source) {
+            await reply(`🖼️ Reply to an image (or send the image with the caption) using *${prefix}${command}*.`);
             return true;
         }
         try {
-            const buffer = await downloadQuoted(EliteProTech, q);
+            const raw = await downloadQuoted(EliteProTech, source);
             if (command === 'groupfullpp') {
-                await setFullProfilePicture(EliteProTech, m.chat, buffer);
-                await reply('✅ Group profile picture updated (full image, no crop).');
+                const padded = await padToSquare(raw);
+                await EliteProTech.updateProfilePicture(m.chat, padded);
+                await reply('✅ Group profile picture updated — full image, nothing cropped out.');
             } else {
-                await EliteProTech.updateProfilePicture(m.chat, buffer);
+                const cropped = await cropSquare(raw);
+                await EliteProTech.updateProfilePicture(m.chat, cropped);
                 await reply('✅ Group profile picture updated (cropped).');
             }
         } catch (err) {
             console.error('grouppp error:', err?.message || err);
-            await reply('❌ Failed to update the group picture. Make sure I am a group admin.');
+            await reply(`❌ Could not set the group picture.\n${err?.message || err}\n\nI must be a group admin to change it.`);
         }
         return true;
     }
 
-    /* ---------- GROUP STATUS ---------- */
-    if (command === 'groupstatus') {
-        if (!isGroupChat) {
+    /* ---------- GROUP STATUS (real WhatsApp status) ---------- */
+    if (command === 'groupstatus' || command === 'addstatus' || command === 'mystatus') {
+        const groupMode = command === 'groupstatus';
+        if (groupMode && !isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
             return true;
         }
-        const store = readJson(GROUP_STATUS_FILE, {});
-        const list = store[m.chat] = store[m.chat] || [];
         const sub = args.toLowerCase().split(/ +/)[0];
-        const rest = args.slice(sub.length).trim();
-        const q = quotedInfo(m);
-        const quotedText = q ? (q.message.conversation || q.message.extendedTextMessage?.text || q.message.imageMessage?.caption || q.message.videoMessage?.caption || '') : '';
+        const rest = ['add', 'post', 'upload'].includes(sub) ? args.slice(sub.length).trim() : args.trim();
 
-        if (sub === 'add') {
-            const entry = (rest || quotedText).trim();
-            if (!entry) {
-                await reply(`➕ Reply to what you want to add, or type it:\n*${prefix}groupstatus add <text>*`);
+        try {
+            const audience = groupMode
+                ? await groupAudience(EliteProTech, m.chat)
+                : [ownerJid(EliteProTech), m.sender || m.chat].filter(Boolean);
+
+            const content = await buildStatusContent(EliteProTech, m, rest);
+            if (!content) {
+                await reply(
+                    `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
+                    `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
+                    `or type *${prefix}${command} add <your text>*.`
+                );
                 return true;
             }
-            list.push(entry.slice(0, 1000));
-            writeJson(GROUP_STATUS_FILE, store);
-            await reply(`✅ Added to the group status.\n\n*${list.length}.* ${entry}`);
-            return true;
+
+            await EliteProTech.sendMessage('status@broadcast', content, {
+                backgroundColor: '#0a0a0a',
+                font: 3,
+                statusJidList: audience,
+                broadcast: true
+            });
+            await reply(`✅ Posted to ${groupMode ? 'the group status' : 'your status'} (${audience.length} viewers).`);
+        } catch (err) {
+            console.error('groupstatus error:', err?.message || err);
+            await reply(`❌ Could not post the status.\n${err?.message || err}`);
         }
-
-        if (sub === 'remove' || sub === 'delete' || sub === 'del') {
-            const target = (rest || quotedText).trim();
-            if (!target) {
-                await reply(`➖ Reply to the status you want to remove with *${prefix}groupstatus remove*, or pass its number.`);
-                return true;
-            }
-            let index = -1;
-            if (/^\d+$/.test(target)) index = parseInt(target, 10) - 1;
-            else index = list.findIndex(x => x.trim() === target || x.includes(target));
-            if (index < 0 || index >= list.length) {
-                await reply('❌ That status was not found.');
-                return true;
-            }
-            const [removed] = list.splice(index, 1);
-            writeJson(GROUP_STATUS_FILE, store);
-            await reply(`🗑️ Removed from the group status:\n\n${removed}`);
-            return true;
-        }
-
-        await reply(
-            `📌 *GROUP STATUS*\n\n` +
-            (list.length ? list.map((x, i) => `*${i + 1}.* ${x}`).join('\n\n') : '_Nothing here yet._') +
-            `\n\n*${prefix}groupstatus add* (reply or type)\n*${prefix}groupstatus remove* (reply or number)`
-        );
         return true;
     }
+
 
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
@@ -691,47 +752,128 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
-    if (command === 'antideletegroup' || command === 'antideletegroupmessage') {
+    if (command.startsWith('antideletegroup')) {
         const opt = args.toLowerCase().trim();
         const config = readJson(ANTIDELETE_GROUP_FILE, { all: false, chats: {} });
         config.chats = config.chats || {};
         const isGroup = String(m.chat || '').endsWith('@g.us');
+        // .antideletegroup-public / .antideletegroup-private, or ".antideletegroup public enable"
+        let mode = command.includes('-public') ? 'public' : command.includes('-private') ? 'private' : null;
+        if (!mode && /^(public|private)/.test(opt)) mode = opt.split(/ +/)[0];
+        const action = opt.replace(/^(public|private)\s*/, '').trim();
+        const current = config.chats[m.chat];
+        const currentMode = current === true ? 'public' : current || null;
 
-        if (opt === 'enable' || opt === 'on') {
+        if (action === 'enable' || action === 'on' || (mode && !action)) {
             if (!isGroup) {
                 await reply('ℹ️ Use this command inside the group you want to protect.');
                 return true;
             }
-            config.chats[m.chat] = true;
+            config.chats[m.chat] = mode || 'public';
             writeJson(ANTIDELETE_GROUP_FILE, config);
-            // capture must be on for restoring to be possible
             const anti = readJson(ANTIDELETE_FILE, { enabled: false });
             anti.enabled = true;
             writeJson(ANTIDELETE_FILE, anti);
             await reply(
-                '✅ *Anti-delete group message enabled for this group.*\n\n' +
-                'Whenever anyone (member or admin) deletes a message for everyone, I instantly re-post it here and warn them that they cannot delete another member\u2019s message.\n\n' +
-                '⚠️ Note: WhatsApp itself controls the delete button inside the official app, so the warning appears here in the chat, not inside their app dialog.'
+                config.chats[m.chat] === 'private'
+                    ? '🔒 *Anti-delete group: PRIVATE.*\nDeleted messages in this group are restored to your DM only.'
+                    : '📢 *Anti-delete group: PUBLIC.*\nDeleted messages are restored inside this group, tagging who sent it and who deleted it.'
             );
             return true;
         }
-        if (opt === 'disable' || opt === 'off') {
+        if (action === 'disable' || action === 'off') {
             if (isGroup) delete config.chats[m.chat];
             config.all = false;
             writeJson(ANTIDELETE_GROUP_FILE, config);
-            await reply('❌ *Anti-delete group message disabled.*');
+            await reply('❌ *Anti-delete group disabled for this group.*');
             return true;
         }
-        const on = config.all === true || config.chats[m.chat] === true;
         await reply(
-            `🛡️ *ANTI DELETE GROUP MESSAGE*\n\nStatus here: ${on ? '✅ ENABLED' : '❌ DISABLED'}\n\n` +
-            `*${prefix}antideletegroup enable*\n*${prefix}antideletegroup disable*`
+            `🛡️ *ANTI DELETE GROUP*\n\nStatus here: ${currentMode ? `✅ ${currentMode.toUpperCase()}` : '❌ DISABLED'}\n\n` +
+            `*${prefix}antideletegroup-public enable* — restore inside the group\n` +
+            `*${prefix}antideletegroup-private enable* — restore to your DM\n` +
+            `*${prefix}antideletegroup-public disable* — turn it off`
+        );
+        return true;
+    }
+
+    /* ---------- CHATBOT SWITCHES + PERSONALITIES ---------- */
+    if (command === 'chatbot' || command === 'chatbot-friend' || command === 'chatbot-love') {
+        const store = readJson(CHATBOT_FILE, {});
+        store.chats = store.chats || {};
+        store.modes = store.modes || {};
+        const parts = args.toLowerCase().split(/ +/).filter(Boolean);
+        const persona = command === 'chatbot-friend' ? 'friend' : command === 'chatbot-love' ? 'love' : null;
+        const scope = parts[0] || '';
+        const state = parts[parts.length - 1];
+        const on = state === 'on' || state === 'enable';
+        const off = state === 'off' || state === 'disable';
+
+        if (persona) {
+            if (off) {
+                delete store.modes[m.chat];
+                writeJson(CHATBOT_FILE, store);
+                await reply(`✅ Back to the normal chatbot personality here.`);
+                return true;
+            }
+            store.modes[m.chat] = persona;
+            store.chats[m.chat] = true;
+            writeJson(CHATBOT_FILE, store);
+            await reply(
+                persona === 'love'
+                    ? '💖 *Chatbot-love enabled here.* I now chat with a warm, romantic, affectionate personality — it keeps learning from real human love talk online.'
+                    : '🤝 *Chatbot-friend enabled here.* I now chat like a close, loyal friend — relaxed, supportive and playful.'
+            );
+            return true;
+        }
+
+        if ((scope === 'here' || scope === 'this') && (on || off)) {
+            if (on) store.chats[m.chat] = true;
+            else delete store.chats[m.chat];
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON in this chat.' : '🤖 Chatbot is now OFF in this chat.');
+            return true;
+        }
+        if (scope === 'dm' && (on || off)) {
+            store.dm = on;
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON for all DMs.' : '🤖 Chatbot is now OFF for DMs.');
+            return true;
+        }
+        if (scope === 'group' && (on || off)) {
+            store.group = on;
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON in all groups.' : '🤖 Chatbot is now OFF in groups.');
+            return true;
+        }
+        if (scope === 'all' || scope === 'global') {
+            store.global = on;
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON everywhere.' : '🤖 Chatbot is now OFF everywhere.');
+            return true;
+        }
+        if (on || off) {
+            store.chats[m.chat] = on || undefined;
+            if (!on) delete store.chats[m.chat];
+            writeJson(CHATBOT_FILE, store);
+            await reply(on ? '🤖 Chatbot is now ON in this chat.' : '🤖 Chatbot is now OFF in this chat.');
+            return true;
+        }
+
+        const here = store.global || store.chats[m.chat] === true ||
+            (String(m.chat).endsWith('@g.us') ? store.group : store.dm);
+        await reply(
+            `🤖 *CHATBOT*\n\nHere: ${here ? '✅ ON' : '❌ OFF'}\nDMs: ${store.dm ? '✅' : '❌'}  |  Groups: ${store.group ? '✅' : '❌'}\n` +
+            `Personality here: *${store.modes[m.chat] || 'normal'}*\n\n` +
+            `*${prefix}chatbot dm on/off*\n*${prefix}chatbot group on/off*\n*${prefix}chatbot here on/off*\n` +
+            `*${prefix}chatbot all on/off*\n*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)`
         );
         return true;
     }
 
     return false;
 }
+
 
 /* ============================ HANDLER PATCHES ============================ */
 
@@ -757,9 +899,9 @@ function patchHandler(source) {
     };
 
     // SETTINGS
-    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n', 'settings-commands');
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Addstatus\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n│𖥟╾ Promotewhennot\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
     // GENERAL

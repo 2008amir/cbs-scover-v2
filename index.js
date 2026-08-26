@@ -92,11 +92,59 @@ function rememberFacts(sender, text) {
     while (facts.length > 12) facts.shift();
 }
 
-global.buildChatbotPrompt = function buildChatbotPrompt(history, pushName, sender) {
+/* ---- personalities: normal / friend / love ---- */
+function chatbotMode(chatJid) {
+    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
+    return data?.modes?.[chatJid] || 'normal';
+}
+
+// The love personality keeps learning from real human love talk published
+// online; the material is fetched once and cached for the session.
+global.personaLearning = global.personaLearning || {};
+async function learnPersona(mode) {
+    if (mode === 'normal') return '';
+    if (global.personaLearning[mode]) return global.personaLearning[mode];
+    const url = mode === 'love'
+        ? 'https://api.quotable.io/quotes?tags=love&limit=25'
+        : 'https://api.quotable.io/quotes?tags=friendship&limit=25';
+    try {
+        const { data } = await axios.get(url, { timeout: 15000 });
+        const lines = (data?.results || []).map(q => `- ${q.content}`).join('\n');
+        if (lines) global.personaLearning[mode] = lines;
+    } catch (err) {
+        console.log('persona learning offline:', err?.message || err);
+    }
+    return global.personaLearning[mode] || '';
+}
+global.learnPersona = learnPersona;
+
+function personaBlock(mode, learned) {
+    if (mode === 'love') {
+        return `
+PERSONALITY OVERRIDE — LOVE
+- You are deeply warm, romantic and affectionate with this person.
+- You flirt gently, use pet names sparingly, and you care how their day felt.
+- You are emotionally attentive: notice their mood, comfort them, celebrate with them.
+- Never cold or robotic; never lecture. Short, tender, human messages.
+${learned ? `\nHuman love talk you have learned from (absorb the feeling, never quote it):\n${learned}` : ''}`;
+    }
+    if (mode === 'friend') {
+        return `
+PERSONALITY OVERRIDE — BEST FRIEND
+- You are their close, loyal friend: relaxed, playful, honest, supportive.
+- You joke, tease lightly, hype them up and check on them.
+- No romance, no formality — just real friendship energy.
+${learned ? `\nHuman friendship talk you have learned from (absorb the feeling, never quote it):\n${learned}` : ''}`;
+    }
+    return '';
+}
+
+global.buildChatbotPrompt = function buildChatbotPrompt(history, pushName, sender, chatJid, persona) {
     const name = chatbotName();
     const user = (pushName && String(pushName).trim()) || 'friend';
     const facts = (global.chatFacts[sender] || []).join('; ') || 'nothing yet';
     return `
+
 You are ${name}, a conversational WhatsApp companion. You chat like a real, friendly person — never like a formal assistant. You do not claim to be a human being if someone sincerely asks whether you are a bot; you answer honestly but casually, then keep the conversation going.
 
 WHO YOU ARE TALKING TO
@@ -129,6 +177,7 @@ Only mention these shortcuts when they actually ask for that thing:
 - video -> ".video [name]"
 - image -> ".img [name]"
 - command list -> ".menu"
+${persona || ''}
 
 RECENT CONVERSATION
 ${history}
@@ -194,7 +243,9 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
     rememberFacts(sender, combined);
 
     const history = global.userChats[sender].join('\n').slice(-4000);
-    const prompt = global.buildChatbotPrompt(history, mek.pushName, sender);
+    const mode = chatbotMode(from);
+    const persona = personaBlock(mode, await learnPersona(mode));
+    const prompt = global.buildChatbotPrompt(history, mek.pushName, sender, from, persona);
 
     // WhatsApp "typing..." (three dots) stays live the whole time the reply is
     // being written, and is only cleared once the message is actually sent.
@@ -247,14 +298,14 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
-        if (!chatbotData.global && !typeEnabled && !chatEnabled) return;
-
-        // Private mode: the bot only talks in chats the owner explicitly enabled.
-        if (EliteProTech.public === false && !chatEnabled) return;
+        // "chatbot dm on" / "chatbot group on" work on their own — no per-user
+        // opt-in needed, and group chats are answered exactly like DMs.
+        if (chatbotData.global !== true && !typeEnabled && !chatEnabled) return;
 
         const text = extractText(mek);
         if (!text.trim()) return;
         if (text.trim().startsWith(global.prefix || '.')) return;
+
 
         const sender = mek.key.participant || from;
         const bufKey = `${from}|${sender}`;
@@ -424,40 +475,55 @@ global.restoreDeletedMessage = async function restoreDeletedMessage(EliteProTech
    closest supported behaviour: when it is enabled for a group, the bot
    instantly re-posts the deleted message back into the group and warns the
    person who deleted it. */
-global.antiDeleteGroupEnabled = function antiDeleteGroupEnabled(jid) {
+// Returns 'public' (restore inside the group), 'private' (restore to the
+// owner's DM) or null when it is off for that group.
+global.antiDeleteGroupMode = function antiDeleteGroupMode(jid) {
     const data = readJsonSafe(ANTIDELETE_GROUP_FILE, { chats: {}, all: false });
-    return data.all === true || data.chats?.[jid] === true;
+    const value = data.chats?.[jid] ?? (data.all === true ? 'public' : null);
+    if (value === true) return 'public';
+    return value === 'public' || value === 'private' ? value : null;
+};
+
+global.antiDeleteGroupEnabled = function antiDeleteGroupEnabled(jid) {
+    return !!global.antiDeleteGroupMode(jid);
 };
 
 global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTech, remoteJid, deletedBy, sentBy, message, quoted) {
     try {
         if (!remoteJid || !String(remoteJid).endsWith('@g.us')) return false;
-        if (!global.antiDeleteGroupEnabled(remoteJid)) {
+        const mode = global.antiDeleteGroupMode(remoteJid);
+        if (!mode) {
             console.log('ℹ️ Anti-delete-group is off for', remoteJid);
             return false;
         }
+
+        const target = mode === 'private'
+            ? `${String(EliteProTech?.user?.id || OWNER_NUMBER).split(':')[0].split('@')[0]}@s.whatsapp.net`
+            : remoteJid;
 
         const warn =
             `🚫 *DELETED MESSAGE RESTORED*\n\n` +
             `✍️ Sent by: @${String(sentBy || '').split('@')[0]}\n` +
             `🗑️ Deleted by: @${String(deletedBy || '').split('@')[0]}\n` +
+            (mode === 'private' ? `👥 Group: ${remoteJid}\n` : '') +
             `💬 The message is below:`;
 
         await global.restoreDeletedMessage(
             EliteProTech,
-            remoteJid,
+            target,
             warn,
             message,
             quoted,
             [deletedBy, sentBy].filter(Boolean)
         );
-        console.log('✅ Anti-delete-group restored a message in', remoteJid);
+        console.log(`✅ Anti-delete-group (${mode}) restored a message from`, remoteJid);
         return true;
     } catch (err) {
         console.error('❌ Anti-delete-group error:', err?.message || err);
         return false;
     }
 };
+
 
 
 /* ============================ MENU ============================ */
@@ -482,8 +548,46 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
         }
     ];
 
-    // 1) Always deliver the menu itself first — plain image + caption always
-    //    renders on every WhatsApp version, so the menu can never go missing.
+    // 1) Preferred: one interactive message — menu image, menu text and the
+    //    group/channel as real tappable buttons (no raw links in the text).
+    try {
+        const {
+            generateWAMessageFromContent,
+            prepareWAMessageMedia,
+            proto
+        } = require('baileys');
+
+        const media = await prepareWAMessageMedia(
+            { image: typeof image === 'string' ? { url: image } : image },
+            { upload: EliteProTech.waUploadToServer }
+        );
+
+        const msg = generateWAMessageFromContent(
+            m.chat,
+            proto.Message.fromObject({
+                viewOnceMessage: {
+                    message: {
+                        interactiveMessage: proto.Message.InteractiveMessage.create({
+                            body: proto.Message.InteractiveMessage.Body.create({ text: caption }),
+                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+                            header: proto.Message.InteractiveMessage.Header.create({
+                                hasMediaAttachment: true,
+                                ...media
+                            }),
+                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
+                        })
+                    }
+                }
+            }),
+            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
+        );
+        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
+        return;
+    } catch (err) {
+        console.error('Interactive menu unavailable, falling back:', err?.message || err);
+    }
+
+    // 2) Fallback for clients that cannot render buttons.
     const links = `\n\n👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}`;
     try {
         await EliteProTech.sendMessage(
@@ -496,28 +600,6 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
         await EliteProTech.sendMessage(m.chat, { text: `${caption}${links}` }, { quoted: m }).catch(() => {});
     }
 
-    // 2) Then try to add tappable buttons underneath (ignored if unsupported).
-    try {
-        const { generateWAMessageFromContent, proto } = require('baileys');
-        const msg = generateWAMessageFromContent(
-            m.chat,
-            proto.Message.fromObject({
-                viewOnceMessage: {
-                    message: {
-                        interactiveMessage: proto.Message.InteractiveMessage.create({
-                            body: proto.Message.InteractiveMessage.Body.create({ text: '📌 Quick links' }),
-                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
-                        })
-                    }
-                }
-            }),
-            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
-        );
-        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
-    } catch (err) {
-        console.error('Menu buttons unavailable:', err?.message || err);
-    }
 };
 
 
@@ -547,7 +629,9 @@ function patchSource(source) {
     const _jid = quoted?.key?.remoteJid
     const _by = mentions?.[0]
     const _sent = mentions?.[1]
-    try { await global.enforceAntiDeleteGroup(EliteProTech, _jid, _by, _sent, msg, quoted) } catch (e) { console.error(e?.message || e) }
+    let _handled = false
+    try { _handled = await global.enforceAntiDeleteGroup(EliteProTech, _jid, _by, _sent, msg, quoted) } catch (e) { console.error(e?.message || e) }
+    if (_handled) return
     return global.restoreDeletedMessage(EliteProTech, from, note, msg, quoted, mentions)
 }
 async function legacyRestoreMessage(EliteProTech, from, note, msg, quoted, mentions) {`
