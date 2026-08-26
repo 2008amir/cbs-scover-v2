@@ -196,9 +196,17 @@ ${history}
 `.trim();
 };
 
-global.geminiChat = async function geminiChat(systemPrompt, userText) {
+// extraParts lets a voice note be sent straight to the model as inline audio,
+// so it "hears" the message and answers it. The transcript is never shown.
+global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts) {
+    const parts = [];
+    const text = String(userText || '').slice(0, 6000);
+    if (text) parts.push({ text });
+    if (Array.isArray(extraParts) && extraParts.length) parts.push(...extraParts);
+    if (!parts.length) parts.push({ text: '...' });
+
     const body = {
-        contents: [{ role: 'user', parts: [{ text: String(userText || '').slice(0, 6000) }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig: { temperature: 0.95, topP: 0.95, maxOutputTokens: 800 }
     };
     if (systemPrompt) {
@@ -206,22 +214,33 @@ global.geminiChat = async function geminiChat(systemPrompt, userText) {
     }
 
     let lastError = null;
-    for (const model of GEMINI_MODELS) {
-        try {
-            const { data } = await axios.post(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-                body,
-                { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-            );
-            const parts = data?.candidates?.[0]?.content?.parts || [];
-            const reply = parts.map(p => p?.text || '').join('').trim();
-            if (reply) return reply;
-            lastError = new Error('empty gemini response');
-        } catch (err) {
-            lastError = err;
+    const total = GEMINI_API_KEYS.length;
+    // Start from the key that worked last time, then roll over to the others.
+    for (let k = 0; k < total; k++) {
+        const keyIndex = (global.geminiKeyIndex + k) % total;
+        const key = GEMINI_API_KEYS[keyIndex];
+        for (const model of GEMINI_MODELS) {
+            try {
+                const { data } = await axios.post(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+                    body,
+                    { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
+                );
+                const out = (data?.candidates?.[0]?.content?.parts || [])
+                    .map(p => p?.text || '').join('').trim();
+                if (out) {
+                    global.geminiKeyIndex = keyIndex; // remember the working key
+                    return out;
+                }
+                lastError = new Error('empty gemini response');
+            } catch (err) {
+                // Silent fallback: move on to the next model, then the next key.
+                lastError = err;
+            }
         }
     }
-    console.error('Gemini error:', lastError?.response?.data || lastError?.message);
+    // Every key failed — stop here instead of retrying in a loop.
+    console.error('Gemini error (all keys failed):', lastError?.response?.data || lastError?.message);
     return 'I could not generate a reply at this time. Please try again.';
 };
 
@@ -229,6 +248,38 @@ function extractText(mek) {
     const msg = mek?.message || {};
     return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.videoMessage?.caption || '';
 }
+
+function voiceNode(mek) {
+    const msg = mek?.message || {};
+    const inner = msg.ephemeralMessage?.message || msg.viewOnceMessageV2?.message || msg;
+    return inner.audioMessage || null;
+}
+
+// Download a voice note and hand it to the model as audio. Nothing about the
+// transcription is ever sent to the chat — only the answer.
+async function voiceParts(EliteProTech, mek) {
+    const node = voiceNode(mek);
+    if (!node) return null;
+    try {
+        const { downloadContentFromMessage } = require('baileys');
+        const stream = await downloadContentFromMessage(node, 'audio');
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+        if (!buffer.length) return null;
+        return [{
+            inlineData: {
+                mimeType: node.mimetype ? String(node.mimetype).split(';')[0] : 'audio/ogg',
+                data: buffer.toString('base64')
+            }
+        }];
+    } catch (err) {
+        console.error('voice note read failed:', err?.message || err);
+        return null;
+    }
+}
+
+
 
 // Human typing rhythm: ~10-15 seconds for every 50 characters of the reply,
 // so short answers come back fast and long ones take proportionally longer.
