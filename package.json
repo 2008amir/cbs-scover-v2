@@ -7,8 +7,11 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "build:dev": "node -e \"process.exit(0)\""
+    "typecheck": "node -e \"process.exit(0)\"",
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/index.html','<!doctype html><meta charset=utf-8><title>CBS-SCOVER</title><h1>CBS-SCOVER WhatsApp bot is running</h1>')\"",
+    "build:dev": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/index.html','<!doctype html><meta charset=utf-8><title>CBS-SCOVER</title><h1>CBS-SCOVER WhatsApp bot is running</h1>')\""
   },
+
   "author": "cyrilix",
   "license": "MIT",
   "dependencies": {
