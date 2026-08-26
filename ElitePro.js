@@ -319,15 +319,85 @@ async function downloadQuoted(EliteProTech, q) {
     throw lastErr || new Error('download failed');
 }
 
-// Full (uncropped) group picture: WhatsApp only crops when the client asks it
-// to, so the raw JPEG is uploaded directly.
-async function setFullProfilePicture(EliteProTech, jid, buffer) {
-    await EliteProTech.query({
-        tag: 'iq',
-        attrs: { to: jid, type: 'set', xmlns: 'w:profile:picture' },
-        content: [{ tag: 'picture', attrs: { type: 'image' }, content: buffer }]
-    });
+// Image the command should work on: a replied image, or the image the command
+// was sent as a caption of.
+function imageSource(m) {
+    const q = quotedInfo(m);
+    if (q && unwrap(q.message).imageMessage) return q;
+    const own = unwrap(m.message || {});
+    if (own.imageMessage) return { message: m.message, key: m.key };
+    return null;
 }
+
+async function cropSquare(buffer) {
+    const Jimp = require('jimp');
+    const img = await Jimp.read(buffer);
+    const side = Math.min(img.getWidth(), img.getHeight());
+    return img
+        .crop((img.getWidth() - side) / 2, (img.getHeight() - side) / 2, side, side)
+        .resize(640, 640)
+        .quality(90)
+        .getBufferAsync(Jimp.MIME_JPEG);
+}
+
+// WhatsApp always displays a square profile picture, so "full, no crop" means
+// fitting the whole image inside a square canvas instead of cutting it.
+async function padToSquare(buffer) {
+    const Jimp = require('jimp');
+    const img = await Jimp.read(buffer);
+    const side = Math.max(img.getWidth(), img.getHeight());
+    const canvas = new Jimp(side, side, 0x000000ff);
+    const fitted = img.clone().contain(side, side);
+    canvas.composite(fitted, 0, 0);
+    return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
+}
+
+async function groupAudience(EliteProTech, jid) {
+    try {
+        const meta = await EliteProTech.groupMetadata(jid);
+        return (meta?.participants || []).map(p => p.id || p.jid).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+// Builds a real WhatsApp status payload from a replied message (text, image,
+// video or audio) or from typed text.
+async function buildStatusContent(EliteProTech, m, typedText) {
+    const q = quotedInfo(m);
+    const quoted = q ? unwrap(q.message) : {};
+
+    if (q && (quoted.imageMessage || quoted.videoMessage || quoted.audioMessage)) {
+        const buffer = await downloadQuoted(EliteProTech, q);
+        if (quoted.imageMessage) {
+            return { image: buffer, caption: typedText || quoted.imageMessage.caption || '' };
+        }
+        if (quoted.videoMessage) {
+            return { video: buffer, caption: typedText || quoted.videoMessage.caption || '' };
+        }
+        return {
+            audio: buffer,
+            mimetype: quoted.audioMessage.mimetype || 'audio/mp4',
+            ptt: !!quoted.audioMessage.ptt
+        };
+    }
+
+    const own = unwrap(m.message || {});
+    if (own.imageMessage || own.videoMessage) {
+        const buffer = await downloadQuoted(EliteProTech, { message: m.message, key: m.key });
+        return own.imageMessage
+            ? { image: buffer, caption: typedText }
+            : { video: buffer, caption: typedText };
+    }
+
+    const text =
+        typedText ||
+        quoted.conversation ||
+        quoted.extendedTextMessage?.text ||
+        '';
+    return text.trim() ? { text: text.trim() } : null;
+}
+
 
 async function sendViewOnceCopy(EliteProTech, q, target, m) {
     const message = unwrap(q.message);
