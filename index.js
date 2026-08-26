@@ -265,7 +265,7 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
             } catch (err) {
                 console.error('❌ Chatbot Error:', err?.message || err);
             }
-        }, 3500);
+        }, 1200);
     } catch (err) {
         console.error('❌ Chatbot Error:', err?.message || err);
     }
