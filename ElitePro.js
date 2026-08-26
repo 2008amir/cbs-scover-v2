@@ -206,6 +206,7 @@ async function handleAiVoice(EliteProTech, m) {
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
 const ANTIDELETE_FILE = path.join(__dirname, 'database', 'antidelete.json');
 const ANTIDELETE_GROUP_FILE = path.join(__dirname, 'database', 'antideletegroup.json');
+const CHATBOT_FILE = path.join(__dirname, 'database', 'chatbot.json');
 
 function readJson(file, fallback) {
     try {
