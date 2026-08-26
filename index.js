@@ -208,13 +208,16 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts) {
 
     let reply;
     try {
+        const started = Date.now();
         reply = await global.geminiChat(prompt, combined);
-        // Pace the answer like a person actually typing it.
-        await new Promise(r => setTimeout(r, humanDelay(reply.length)));
+        // Pace the answer like a person typing it, minus the time already spent.
+        const wait = humanDelay(reply.length) - (Date.now() - started);
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
     } finally {
         typing = false;
         await EliteProTech.sendPresenceUpdate('paused', from).catch(() => {});
     }
+
 
     global.userChats[sender].push(`Bot: ${reply}`);
     while (global.userChats[sender].length > 20) global.userChats[sender].shift();
