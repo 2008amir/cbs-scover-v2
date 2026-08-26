@@ -177,6 +177,7 @@ Only mention these shortcuts when they actually ask for that thing:
 - video -> ".video [name]"
 - image -> ".img [name]"
 - command list -> ".menu"
+${persona || ''}
 
 RECENT CONVERSATION
 ${history}
