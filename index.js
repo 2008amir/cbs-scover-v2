@@ -169,12 +169,15 @@ function extractText(mek) {
     return msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.videoMessage?.caption || '';
 }
 
-// Human typing rhythm: base 10-15s, longer for longer answers, capped.
+// Human typing rhythm: ~10-15 seconds for every 50 characters of the reply,
+// so short answers come back fast and long ones take proportionally longer.
 function humanDelay(replyLength) {
-    const base = 10000 + Math.random() * 5000;
-    const extra = Math.min(replyLength * 55, 15000);
-    return Math.round(base + extra);
+    const perChunk = 10000 + Math.random() * 5000; // 10-15s per 50 characters
+    const chunks = Math.max(replyLength, 1) / 50;
+    const delay = perChunk * chunks;
+    return Math.round(Math.min(Math.max(delay, 1500), 30000));
 }
+
 
 async function generateAndSend(EliteProTech, from, sender, mek, texts) {
     const combined = texts.join('\n').trim();
