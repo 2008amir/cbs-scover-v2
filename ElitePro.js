@@ -738,24 +738,45 @@ async function handleExtraCommands(EliteProTech, m) {
 
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
-        const parsed = parseMenuButton(args);
-        if (!parsed.buttons.length) {
+        if (!args) {
             await reply(menuButtonHelp(prefix));
             return true;
         }
+        const parsed = parseMenuButton(args);
+
+        if (parsed.errors.length) {
+            await reply(
+                `⚠️ *MENU BUTTON — formatting problem*\n\n${parsed.errors.join('\n\n')}\n\n` +
+                `Correct format:\n| Label | https://link\n| Label | msg: your text | to: 2349162748703`
+            );
+            if (!parsed.buttons.length) return true;
+        }
+
+        if (!parsed.buttons.length) {
+            await reply(
+                `⚠️ No button line found.\nAdd at least one line starting with *|*, for example:\n` +
+                `| Open Website | https://codebreakers.uk\n\n` +
+                menuButtonHelp(prefix)
+            );
+            return true;
+        }
+
         try {
             const q = quotedInfo(m);
             let image = null;
-            if (q && (q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
+            if (q && unwrap(q.message).imageMessage) {
                 image = await downloadQuoted(EliteProTech, q).catch(() => null);
+            } else if (unwrap(m.message || {}).imageMessage) {
+                image = await downloadQuoted(EliteProTech, { message: m.message, key: m.key }).catch(() => null);
             }
-            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image);
+            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image, parsed.plain);
         } catch (err) {
             console.error('menubutton error:', err?.message || err);
-            await reply('❌ Failed to send the button message.');
+            await reply(`❌ Failed to send the button message.\n${err?.message || err}`);
         }
         return true;
     }
+
 
     /* ---------- VIEW ONCE TO DM ---------- */
     if (command === 'vvdm' || command === 'vv2' || command === 'viewoncedm') {
