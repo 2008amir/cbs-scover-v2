@@ -669,18 +669,34 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
     }
 
     // 2) Then the group / channel links as real tappable buttons.
+    //    Native flow buttons only render when the interactive message carries
+    //    messageContextInfo and is wrapped in viewOnceMessage — otherwise the
+    //    relay succeeds but WhatsApp shows nothing.
     try {
+        if (typeof global.sendNativeFlow === 'function') {
+            await global.sendNativeFlow(EliteProTech, m.chat, {
+                body: '🔗 *CBS-SCOVER LINKS*',
+                buttons: buttonsRow,
+                quoted: m
+            });
+            return;
+        }
         const { generateWAMessageFromContent, proto } = require('baileys');
         const msg = generateWAMessageFromContent(
             m.chat,
             proto.Message.fromObject({
-                interactiveMessage: proto.Message.InteractiveMessage.create({
-                    body: proto.Message.InteractiveMessage.Body.create({ text: '🔗 *CBS-SCOVER LINKS*' }),
-                    footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-                    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
-                })
+                viewOnceMessage: {
+                    message: {
+                        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+                        interactiveMessage: proto.Message.InteractiveMessage.create({
+                            body: proto.Message.InteractiveMessage.Body.create({ text: '🔗 *CBS-SCOVER LINKS*' }),
+                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
+                        })
+                    }
+                }
             }),
-            { userJid: EliteProTech.user?.id || m.sender }
+            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
         );
         await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
         return;
