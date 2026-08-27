@@ -332,8 +332,9 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
     // Every key failed — stop here instead of retrying in a loop.
     console.error('Gemini error (all keys failed):', lastError?.response?.data?.error?.message || lastError?.message);
     if (leaked || GEMINI_DEAD_KEYS.size >= total) {
-        return '⚠️ The Gemini API key is no longer valid (Google revoked it as leaked). Create a new key at https://aistudio.google.com/apikey, put it in .env as GEMINI_API_KEY and restart the bot.';
+        return '⚠️ The chatbot keys were refused by Google. The keys in .env must be AI Studio API keys (they start with *AIza...*), not OAuth/ephemeral tokens. Create one at https://aistudio.google.com/apikey and put it in .env as GEMINI_KEY_1, then restart the bot.';
     }
+
     return 'I could not generate a reply at this time. Please try again.';
 };
 
