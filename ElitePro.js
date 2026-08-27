@@ -723,20 +723,28 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
         })
     ];
 
+    const shapeNames = ['native interactive', 'viewOnce'];
+    const dbg = { at: new Date().toISOString(), jid, body, buttons, shape: null, payload: null, errors: [] };
+    global.lastButtonDebug = dbg;
+
     let lastErr = null;
     for (let i = 0; i < shapes.length; i++) {
         try {
+            const content = shapes[i]();
             const msg = generateWAMessageFromContent(
                 jid,
-                proto.Message.fromObject(shapes[i]()),
+                proto.Message.fromObject(content),
                 { userJid: EliteProTech.user?.id || jid, quoted }
             );
             await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
-            console.log(`[buttons] sent using shape ${i + 1}`);
+            dbg.shape = shapeNames[i];
+            dbg.payload = msg.message;
+            console.log(`[buttons] sent using shape ${i + 1} (${shapeNames[i]})`);
             return msg;
         } catch (err) {
             lastErr = err;
-            console.error(`[buttons] shape ${i + 1} failed:`, err?.message || err);
+            dbg.errors.push(`${shapeNames[i]}: ${err?.message || err}`);
+            console.error(`[buttons] shape ${i + 1} (${shapeNames[i]}) failed:`, err?.message || err);
         }
     }
 
