@@ -171,24 +171,47 @@ GENDER
 }
 
 
-// The love personality keeps learning from real human love talk published
-// online; the material is fetched once and cached for the session.
+// The love / friend personalities are seeded with human relationship talk.
+// A short online refresh is attempted once per session; when the host has no
+// DNS/network for it, the built-in material is used silently.
 global.personaLearning = global.personaLearning || {};
+
+const PERSONA_SEED = {
+    love: [
+        '- I missed you today, even the small boring parts of it.',
+        '- Tell me how your day really went, not the short version.',
+        '- You do not have to be okay with me, just be honest.',
+        '- I am proud of you, and I say it because I mean it.',
+        '- Come here, let me spoil you a little.',
+        '- Even when we argue, I am still on your side.'
+    ].join('\n'),
+    friend: [
+        '- Bro, what happened? Talk to me.',
+        '- You are overthinking again, come on.',
+        '- That is actually wild, tell me everything.',
+        '- I got you, always. No stress.',
+        '- Okay but be honest, was it your fault? Haha.',
+        '- Go rest, you have been running all day.'
+    ].join('\n')
+};
+
 async function learnPersona(mode) {
     if (mode === 'normal') return '';
     if (global.personaLearning[mode]) return global.personaLearning[mode];
+    global.personaLearning[mode] = PERSONA_SEED[mode] || '';
     const url = mode === 'love'
         ? 'https://api.quotable.io/quotes?tags=love&limit=25'
         : 'https://api.quotable.io/quotes?tags=friendship&limit=25';
     try {
-        const { data } = await axios.get(url, { timeout: 15000 });
+        const { data } = await axios.get(url, { timeout: 8000 });
         const lines = (data?.results || []).map(q => `- ${q.content}`).join('\n');
-        if (lines) global.personaLearning[mode] = lines;
-    } catch (err) {
-        console.log('persona learning offline:', err?.message || err);
+        if (lines) global.personaLearning[mode] = `${global.personaLearning[mode]}\n${lines}`.trim();
+    } catch {
+        // Offline is fine — the built-in material above is already loaded.
     }
     return global.personaLearning[mode] || '';
 }
+
 global.learnPersona = learnPersona;
 
 function personaBlock(mode, learned) {
