@@ -46,6 +46,17 @@ if (!GEMINI_API_KEYS.length) {
     console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
 }
 
+// Two credential shapes exist: a normal AI Studio API key (starts with "AIza")
+// goes in the ?key= parameter, while an OAuth/ephemeral token (e.g. "AQ....")
+// must be sent as a Bearer token. Sending the wrong one back gives
+// "Request had invalid authentication credentials", so both are tried.
+function geminiAuthVariants(key) {
+    const bearer = { headers: { Authorization: `Bearer ${key}` }, query: '' };
+    const apiKey = { headers: { 'x-goog-api-key': key }, query: '' };
+    return /^AIza/i.test(key) ? [apiKey, bearer] : [bearer, apiKey];
+}
+
+
 
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
