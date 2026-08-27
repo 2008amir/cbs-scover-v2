@@ -772,9 +772,13 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
             { userJid: EliteProTech.user?.id || jid, quoted }
         );
         await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
+        dbg.shape = 'legacy template';
+        dbg.payload = msg.message;
         console.log('[buttons] sent using legacy template buttons');
         return msg;
     } catch (err) {
+        dbg.errors.push(`legacy template: ${err?.message || err}`);
+        dbg.shape = 'failed (all shapes)';
         console.error('[buttons] template fallback failed:', err?.message || err);
         throw lastErr || err;
     }
