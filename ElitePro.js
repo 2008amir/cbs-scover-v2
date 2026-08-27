@@ -742,23 +742,14 @@ global.sendNativeFlow = sendNativeFlow;
 
 
 async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
-    // The post itself always goes out as a normal message first, so the user
-    // never ends up with nothing when the client drops interactive content.
     const listed = (plain && plain.length) ? `\n\n${plain.join('\n')}` : '';
-    try {
-        if (image) {
-            await EliteProTech.sendMessage(m.chat, { image, caption: body }, { quoted: m });
-        } else {
-            await EliteProTech.sendMessage(m.chat, { text: body }, { quoted: m });
-        }
-    } catch (err) {
-        console.error('[menubutton] post send failed:', err?.message || err);
-    }
 
+    // One single message: image header + caption + buttons.
     try {
         await sendNativeFlow(EliteProTech, m.chat, {
-            body: '🔘 Tap an option below',
+            body,
             buttons,
+            image: image || null,
             quoted: m
         });
         console.log(`[menubutton] interactive sent to ${m.chat} (${buttons.length} buttons)`);
@@ -767,10 +758,19 @@ async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
         console.error('[menubutton] interactive send failed:', err?.message || err);
     }
 
-    await EliteProTech.sendMessage(m.chat, { text: `🔘 *OPTIONS*${listed}` }, { quoted: m })
-        .catch(e => console.error('[menubutton] text fallback failed:', e?.message || e));
+    // Only if the interactive message could not be relayed at all.
+    try {
+        if (image) {
+            await EliteProTech.sendMessage(m.chat, { image, caption: `${body}${listed}` }, { quoted: m });
+        } else {
+            await EliteProTech.sendMessage(m.chat, { text: `${body}${listed}` }, { quoted: m });
+        }
+    } catch (err) {
+        console.error('[menubutton] post send failed:', err?.message || err);
+    }
     return 'text';
 }
+
 
 
 // Runs when someone presses one of the generated buttons.
