@@ -660,51 +660,119 @@ function buildButtons(items) {
 }
 
 /**
- * Sends a native-flow interactive message. WhatsApp only renders native flow
- * buttons when the interactive message carries messageContextInfo and is
- * wrapped in viewOnceMessage — without it relayMessage "succeeds" but the
- * client shows nothing at all. That was the reason menus never appeared.
+ * Sends interactive buttons. WhatsApp is picky here: a native-flow message is
+ * silently discarded by the client when messageParamsJson is empty, when the
+ * header is missing, or when the wrapper it expects is not used. Different
+ * WhatsApp builds accept different wrappers, so we try each known-good shape
+ * in order and stop at the first one that relays without throwing.
  */
 async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image, quoted }) {
     const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = require('baileys');
 
-    const interactive = {
-        body: proto.Message.InteractiveMessage.Body.create({ text: body || ' ' }),
-        footer: proto.Message.InteractiveMessage.Footer.create({ text: footer || '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-            buttons,
-            messageParamsJson: ''
-        })
-    };
+    const footerText = footer || '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ';
 
+    let headerMedia = null;
     if (image) {
-        const media = await prepareWAMessageMedia(
-            { image: typeof image === 'string' ? { url: image } : image },
-            { upload: EliteProTech.waUploadToServer }
-        );
-        interactive.header = proto.Message.InteractiveMessage.Header.create({
-            hasMediaAttachment: true,
-            ...media
-        });
+        try {
+            headerMedia = await prepareWAMessageMedia(
+                { image: typeof image === 'string' ? { url: image } : image },
+                { upload: EliteProTech.waUploadToServer }
+            );
+        } catch (err) {
+            console.error('[buttons] header media failed:', err?.message || err);
+        }
     }
 
-    const inner = {
-        messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2
-        },
-        interactiveMessage: proto.Message.InteractiveMessage.create(interactive)
+    const buildInteractive = () => {
+        const interactive = {
+            body: proto.Message.InteractiveMessage.Body.create({ text: body || ' ' }),
+            footer: proto.Message.InteractiveMessage.Footer.create({ text: footerText }),
+            header: proto.Message.InteractiveMessage.Header.create(
+                headerMedia
+                    ? { title: '', subtitle: '', hasMediaAttachment: true, ...headerMedia }
+                    : { title: '', subtitle: '', hasMediaAttachment: false }
+            ),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                buttons,
+                // Must be valid JSON — an empty string makes the client drop the message.
+                messageParamsJson: JSON.stringify({ from: 'api', templateId: String(Date.now()) })
+            })
+        };
+        return proto.Message.InteractiveMessage.create(interactive);
     };
 
-    const msg = generateWAMessageFromContent(
-        jid,
-        proto.Message.fromObject({ viewOnceMessage: { message: inner } }),
-        { userJid: EliteProTech.user?.id || jid, quoted }
-    );
-    await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
-    return msg;
+    const ctx = {
+        deviceListMetadata: {},
+        deviceListMetadataVersion: 2
+    };
+
+    const shapes = [
+        // 1) Plain interactive message (renders on current personal WhatsApp builds).
+        () => ({
+            messageContextInfo: ctx,
+            interactiveMessage: buildInteractive()
+        }),
+        // 2) viewOnce-wrapped interactive message (older / some Android builds).
+        () => ({
+            viewOnceMessage: {
+                message: {
+                    messageContextInfo: ctx,
+                    interactiveMessage: buildInteractive()
+                }
+            }
+        })
+    ];
+
+    let lastErr = null;
+    for (let i = 0; i < shapes.length; i++) {
+        try {
+            const msg = generateWAMessageFromContent(
+                jid,
+                proto.Message.fromObject(shapes[i]()),
+                { userJid: EliteProTech.user?.id || jid, quoted }
+            );
+            await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
+            console.log(`[buttons] sent using shape ${i + 1}`);
+            return msg;
+        } catch (err) {
+            lastErr = err;
+            console.error(`[buttons] shape ${i + 1} failed:`, err?.message || err);
+        }
+    }
+
+    // 3) Legacy template buttons — still rendered by a lot of clients.
+    const templateButtons = buttons.map((b, idx) => {
+        let params = {};
+        try { params = JSON.parse(b.buttonParamsJson || '{}'); } catch { params = {}; }
+        if (b.name === 'cta_url' && params.url) {
+            return { index: idx + 1, urlButton: { displayText: params.display_text || 'Open', url: params.url } };
+        }
+        return { index: idx + 1, quickReplyButton: { displayText: params.display_text || 'Option', id: params.id || `btn_${idx}` } };
+    });
+    try {
+        const msg = generateWAMessageFromContent(
+            jid,
+            proto.Message.fromObject({
+                templateMessage: {
+                    hydratedTemplate: {
+                        hydratedContentText: body || ' ',
+                        hydratedFooterText: footerText,
+                        hydratedButtons: templateButtons
+                    }
+                }
+            }),
+            { userJid: EliteProTech.user?.id || jid, quoted }
+        );
+        await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
+        console.log('[buttons] sent using legacy template buttons');
+        return msg;
+    } catch (err) {
+        console.error('[buttons] template fallback failed:', err?.message || err);
+        throw lastErr || err;
+    }
 }
 global.sendNativeFlow = sendNativeFlow;
+
 
 async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
     // The post itself always goes out as a normal message first, so the user
