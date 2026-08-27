@@ -680,57 +680,27 @@ global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTe
 /* ============================ MENU ============================ */
 
 global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
-    const buttonsRow = [
-        {
-            name: 'cta_url',
-            buttonParamsJson: JSON.stringify({
-                display_text: '👥 Join Our Group',
-                url: GROUP_LINK,
-                merchant_url: GROUP_LINK
-            })
-        },
-        {
-            name: 'cta_url',
-            buttonParamsJson: JSON.stringify({
-                display_text: '📢 Join Our Channel',
-                url: CHANNEL_LINK,
-                merchant_url: CHANNEL_LINK
-            })
-        }
-    ];
-
     const img = typeof image === 'string' ? { url: image } : image;
 
-    // 1) One single message: the menu image + the full command list + the
-    //    group / channel buttons underneath. This is what WhatsApp shows for
-    //    a normal button post, so the menu and the buttons arrive together.
-    try {
-        if (typeof global.sendNativeFlow === 'function') {
-            await global.sendNativeFlow(EliteProTech, m.chat, {
-                body: caption,
-                buttons: buttonsRow,
-                image: img,
-                quoted: m
-            });
-            return;
-        }
-    } catch (err) {
-        console.error('Menu buttons unavailable, falling back to plain menu:', err?.message || err);
-    }
+    // Plain menu: image + command list. No group/channel buttons or links,
+    // and "powered by codebreakers" is always the very last line.
+    const cleaned = String(caption || '')
+        .split('\n')
+        .filter(line => !/chat\.whatsapp\.com|whatsapp\.com\/channel|ɢʀᴏᴜᴘ:|ᴄʜᴀɴɴᴇʟ:|ᴘᴏᴡᴇʀᴇᴅ ʙʏ/i.test(line))
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trimEnd();
 
-    // 2) Fallback: plain image + caption, then the links as text.
+    const text = `${cleaned}\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄᴏᴅᴇʙʀᴇᴀᴋᴇʀꜱ`;
+
     try {
-        await EliteProTech.sendMessage(m.chat, { image: img, caption }, { quoted: m });
+        await EliteProTech.sendMessage(m.chat, { image: img, caption: text }, { quoted: m });
     } catch (err) {
         console.error('Menu image failed, sending text menu:', err?.message || err);
-        await EliteProTech.sendMessage(m.chat, { text: caption }, { quoted: m }).catch(() => {});
+        await EliteProTech.sendMessage(m.chat, { text }, { quoted: m }).catch(() => {});
     }
-
-    await EliteProTech.sendMessage(
-        m.chat,
-        { text: `👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}` }
-    ).catch(() => {});
 };
+
 
 
 
