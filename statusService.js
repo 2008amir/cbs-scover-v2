@@ -24,6 +24,10 @@
 const crypto = require('crypto');
 
 const STORIES_JID = 'status@broadcast';
+// Hard cap on how many recipients one status is encrypted for.
+const MAX_AUDIENCE = 400;
+const RELAY_TIMEOUT_MS = 90 * 1000;
+
 
 /* ----------------------------- logging ---------------------------------- */
 
@@ -189,8 +193,19 @@ async function personalAudience(sock, extraJids = []) {
         if (normalized) set.add(normalized);
     }
 
-    return Array.from(set);
+    // WhatsApp encrypts the status once per recipient. With thousands of JIDs
+    // the relay never finishes (the stanza is built forever and the status
+    // never lands), so the list is capped — self first, then real contacts.
+    const all = Array.from(set);
+    const me2 = selfJid(sock);
+    const ordered = me2 ? [me2, ...all.filter(j => j !== me2)] : all;
+    if (ordered.length > MAX_AUDIENCE) {
+        log('audience truncated from', ordered.length, 'to', MAX_AUDIENCE);
+        return ordered.slice(0, MAX_AUDIENCE);
+    }
+    return ordered;
 }
+
 
 /**
  * Group status audience: the actual, current participants of the group.
@@ -417,7 +432,7 @@ async function relayStatus(sock, waMessage, audience, mentionJids = []) {
     }
 
     try {
-        await sock.relayMessage(STORIES_JID, waMessage.message, {
+        const relay = sock.relayMessage(STORIES_JID, waMessage.message, {
             messageId: waMessage.key.id,
             statusJidList: audience,
             // Without the broadcast flag the server accepts the stanza but the
@@ -425,9 +440,17 @@ async function relayStatus(sock, waMessage, audience, mentionJids = []) {
             broadcast: true,
             ...(additionalNodes.length ? { additionalNodes } : {})
         });
+        // A relay that never settles used to leave the command silent forever.
+        await Promise.race([
+            relay,
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`WhatsApp did not confirm the status within ${RELAY_TIMEOUT_MS / 1000}s (audience: ${audience.length}).`)), RELAY_TIMEOUT_MS)
+            )
+        ]);
     } catch (err) {
         throw new StatusError('relay', err);
     }
+
 
     // Mirror the status into the account's own status list so it shows up on
     // the phone right away instead of only existing on the server.

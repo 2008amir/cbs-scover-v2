@@ -641,35 +641,32 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
         }
     }
 
-    const buildInteractive = () => {
-        const interactive = {
-            body: proto.Message.InteractiveMessage.Body.create({ text: body || ' ' }),
-            footer: proto.Message.InteractiveMessage.Footer.create({ text: footerText }),
-            header: proto.Message.InteractiveMessage.Header.create(
-                headerMedia
-                    ? { title: '', subtitle: '', hasMediaAttachment: true, ...headerMedia }
-                    : { title: '', subtitle: '', hasMediaAttachment: false }
-            ),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-                buttons,
-                // Must be valid JSON — an empty string makes the client drop the message.
-                messageParamsJson: JSON.stringify({ from: 'api', templateId: String(Date.now()) })
-            })
-        };
-        return proto.Message.InteractiveMessage.create(interactive);
-    };
+    const buildInteractive = () => ({
+        body: { text: body || ' ' },
+        footer: { text: footerText },
+        header: headerMedia
+            ? { title: '', subtitle: '', hasMediaAttachment: true, ...headerMedia }
+            : { title: '', subtitle: '', hasMediaAttachment: false },
+        nativeFlowMessage: {
+            buttons,
+            // Must be valid JSON — an empty string makes the client drop the message.
+            messageParamsJson: JSON.stringify({ from: 'api', templateId: String(Date.now()) })
+        }
+    });
 
-    // NOTE: a fake/empty `messageContextInfo.deviceListMetadata` makes the
-    // recipient unable to decrypt the payload — that is what produced the
-    // "Waiting for this message. This may take a while." bubble. It is left
-    // out on purpose; Baileys fills the real context itself.
-
+    // messageContextInfo with an EMPTY deviceListMetadata sits INSIDE the
+    // viewOnce envelope. That is the canonical shape current WhatsApp builds
+    // render native-flow buttons for; it does not affect decryption because
+    // the real device list lives on the outer (encrypted) envelope.
     const shapes = [
-        // 1) viewOnce-wrapped interactive message — the shape current WhatsApp
-        //    builds actually render buttons for.
+        // 1) viewOnce-wrapped interactive message.
         () => ({
             viewOnceMessage: {
                 message: {
+                    messageContextInfo: {
+                        deviceListMetadata: {},
+                        deviceListMetadataVersion: 2
+                    },
                     interactiveMessage: buildInteractive()
                 }
             }
@@ -690,7 +687,7 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
             const content = shapes[i]();
             const msg = generateWAMessageFromContent(
                 jid,
-                proto.Message.fromObject(content),
+                content,
                 { userJid: EliteProTech.user?.id || jid, quoted }
             );
             await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
@@ -704,6 +701,7 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
             console.error(`[buttons] shape ${i + 1} (${shapeNames[i]}) failed:`, err?.message || err);
         }
     }
+
 
     // 3) Legacy template buttons — still rendered by a lot of clients.
     const templateButtons = buttons.map((b, idx) => {
@@ -744,23 +742,14 @@ global.sendNativeFlow = sendNativeFlow;
 
 
 async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
-    // The post itself always goes out as a normal message first, so the user
-    // never ends up with nothing when the client drops interactive content.
     const listed = (plain && plain.length) ? `\n\n${plain.join('\n')}` : '';
-    try {
-        if (image) {
-            await EliteProTech.sendMessage(m.chat, { image, caption: body }, { quoted: m });
-        } else {
-            await EliteProTech.sendMessage(m.chat, { text: body }, { quoted: m });
-        }
-    } catch (err) {
-        console.error('[menubutton] post send failed:', err?.message || err);
-    }
 
+    // One single message: image header + caption + buttons.
     try {
         await sendNativeFlow(EliteProTech, m.chat, {
-            body: '🔘 Tap an option below',
+            body,
             buttons,
+            image: image || null,
             quoted: m
         });
         console.log(`[menubutton] interactive sent to ${m.chat} (${buttons.length} buttons)`);
@@ -769,10 +758,19 @@ async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
         console.error('[menubutton] interactive send failed:', err?.message || err);
     }
 
-    await EliteProTech.sendMessage(m.chat, { text: `🔘 *OPTIONS*${listed}` }, { quoted: m })
-        .catch(e => console.error('[menubutton] text fallback failed:', e?.message || e));
+    // Only if the interactive message could not be relayed at all.
+    try {
+        if (image) {
+            await EliteProTech.sendMessage(m.chat, { image, caption: `${body}${listed}` }, { quoted: m });
+        } else {
+            await EliteProTech.sendMessage(m.chat, { text: `${body}${listed}` }, { quoted: m });
+        }
+    } catch (err) {
+        console.error('[menubutton] post send failed:', err?.message || err);
+    }
     return 'text';
 }
+
 
 
 // Runs when someone presses one of the generated buttons.
