@@ -13,19 +13,33 @@ global.groupLink = GROUP_LINK;
 global.channelLink = CHANNEL_LINK;
 
 // ===== Gemini chatbot =====
-// Multiple keys: if one fails (quota, invalid, rate limit) the next is tried
-// silently. Only when every key has failed does the chatbot give up.
-const GEMINI_API_KEYS = [
-    'AQ.Ab8RN6LvB5tvJ0UFa5OEhiBySoBw88w66PUy0eemRQdY5Z7nZA',
-    'AQ.Ab8RN6K0wycDkwHpCrO9nqZYPQWVRy7lRTvpR9UKmQ-JHT3HMQ',
-    'AQ.Ab8RN6KJX6HsIu7LuD0mpVOPhuh2cTn6BeOGKRRdYM3XqD6A6A',
-    'AQ.Ab8RN6IaWdBeFHrX7G9pvf57gbPPeaAuxkId_dyrF-6yPtcQiA',
-    'AQ.Ab8RN6JsYbC86DFizhsDaS4u1ozEcW7FFmcLGfzp0vs1z0c_dA',
-    'AIzaSyBnNHXQ5CrR_e5YrYnZnGa8_fqv34mc01c'
-];
+// Keys are read from the environment (.env), never hard-coded: keys committed
+// in source get scraped and Google disables them with
+// "Your API key was reported as leaked" (HTTP 403).
+// Set one or more keys in .env:
+//   GEMINI_API_KEY=AIza...
+//   GEMINI_API_KEYS=AIzaKey1,AIzaKey2,AIzaKey3
+try { require('dotenv').config(); } catch {}
+
+const GEMINI_API_KEYS = String(
+    process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || ''
+)
+    .split(/[,\s]+/)
+    .map(k => k.trim())
+    .filter(Boolean);
+
+// Keys WhatsApp-side rotation should skip for the rest of this process:
+// a key revoked as leaked or invalid will never start working again.
+const GEMINI_DEAD_KEYS = new Set();
+
 // Remember which key last worked so the next request starts there.
 global.geminiKeyIndex = global.geminiKeyIndex || 0;
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'];
+
+if (!GEMINI_API_KEYS.length) {
+    console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
+}
+
 
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
