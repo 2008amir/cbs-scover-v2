@@ -351,8 +351,6 @@ async function padToSquare(buffer) {
     return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
 }
 
-// Status audience + status content building now live in ./statusService.js so
-// there is exactly one authoritative status implementation.
 
 
 
