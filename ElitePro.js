@@ -351,11 +351,6 @@ async function padToSquare(buffer) {
     return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
 }
 
-// Status audience + status content building now live in ./statusService.js so
-// there is exactly one authoritative status implementation.
-
-
-
 async function sendViewOnceCopy(EliteProTech, q, target, m) {
     const message = unwrap(q.message);
     const from = String(q.key.participant || m.chat || '').split('@')[0];
@@ -391,8 +386,6 @@ async function handleExtraCommands(EliteProTech, m) {
     const body = extractBody(m);
     if (!body || !body.startsWith(prefix)) return false;
 
-    // Split on any whitespace (including newlines) so multi-line commands like
-    // ".menubutton ...\n| Label | value" are recognised.
     const rest = body.slice(prefix.length).replace(/^\s+/, '');
     const command = (rest.split(/\s+/)[0] || '').toLowerCase();
     const args = rest.slice(command.length).replace(/^[^\S\n]+/, '').replace(/^\n/, '').trim();
@@ -484,9 +477,6 @@ async function handleExtraCommands(EliteProTech, m) {
         }
         return true;
     }
-
-
-
 
 
 
@@ -776,13 +766,11 @@ function patchHandler(source) {
     };
 
     // SETTINGS
-    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Addstatus\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n', 'group-commands');
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
-    // GENERAL
-    addAfter('│𖥟╾ Menu\n', '│𖥟╾ Menubuttonchat\n', 'general-commands');
 
     if (code.includes('│𖥟╾ Aivoice\n')) {
         code = code.split('│𖥟╾ Aivoice\n').join('│𖥟╾ Aivoice\n│𖥟╾ Aivoice-male\n│𖥟╾ Aivoice-female\n│𖥟╾ Aivoice-hausa\n│𖥟╾ Aivoice-hausa-female\n');
@@ -790,7 +778,7 @@ function patchHandler(source) {
         console.log('⚠️ Menu ai-commands patch target not found.');
     }
 
-    // Send the menu with group + channel buttons at the bottom.
+    // Route the menu through our own sender (no buttons, plain image + list).
     const menuSend = `await EliteProTech.sendMessage(m.chat, {
   image: elitepropic,
   caption: elitemenuoh
@@ -806,7 +794,7 @@ function patchHandler(source) {
         if (loose.test(code)) {
             code = code.replace(loose, menuCall);
         } else {
-            console.log('⚠️ Menu button patch target not found.');
+            console.log('⚠️ Menu send patch target not found.');
         }
     }
 
