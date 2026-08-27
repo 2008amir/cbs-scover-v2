@@ -24,6 +24,10 @@
 const crypto = require('crypto');
 
 const STORIES_JID = 'status@broadcast';
+// Hard cap on how many recipients one status is encrypted for.
+const MAX_AUDIENCE = 400;
+const RELAY_TIMEOUT_MS = 90 * 1000;
+
 
 /* ----------------------------- logging ---------------------------------- */
 
