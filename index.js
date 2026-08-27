@@ -477,6 +477,12 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
 global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
     try {
         if (!mek?.message || !mek?.key || mek.key.fromMe) return;
+        // In private mode only the owner gets any answer from the bot.
+        if (typeof global.botIsPublic === 'function' && !global.botIsPublic()) {
+            const senderJid = mek.key.participant || mek.key.remoteJid || '';
+            if (!global.isOwnerMessage?.({ key: mek.key, sender: senderJid })) return;
+        }
+
         const from = mek.key.remoteJid;
         if (!from || from === 'status@broadcast') return;
 
