@@ -353,51 +353,9 @@ async function padToSquare(buffer) {
     return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
 }
 
-async function groupAudience(EliteProTech, jid) {
-    try {
-        const meta = await EliteProTech.groupMetadata(jid);
-        return (meta?.participants || []).map(p => p.id || p.jid).filter(Boolean);
-    } catch {
-        return [];
-    }
-}
+// Status audience + status content building now live in ./statusService.js so
+// there is exactly one authoritative status implementation.
 
-// Builds a real WhatsApp status payload from a replied message (text, image,
-// video or audio) or from typed text.
-async function buildStatusContent(EliteProTech, m, typedText) {
-    const q = quotedInfo(m);
-    const quoted = q ? unwrap(q.message) : {};
-
-    if (q && (quoted.imageMessage || quoted.videoMessage || quoted.audioMessage)) {
-        const buffer = await downloadQuoted(EliteProTech, q);
-        if (quoted.imageMessage) {
-            return { image: buffer, caption: typedText || quoted.imageMessage.caption || '' };
-        }
-        if (quoted.videoMessage) {
-            return { video: buffer, caption: typedText || quoted.videoMessage.caption || '' };
-        }
-        return {
-            audio: buffer,
-            mimetype: quoted.audioMessage.mimetype || 'audio/mp4',
-            ptt: !!quoted.audioMessage.ptt
-        };
-    }
-
-    const own = unwrap(m.message || {});
-    if (own.imageMessage || own.videoMessage) {
-        const buffer = await downloadQuoted(EliteProTech, { message: m.message, key: m.key });
-        return own.imageMessage
-            ? { image: buffer, caption: typedText }
-            : { video: buffer, caption: typedText };
-    }
-
-    const text =
-        typedText ||
-        quoted.conversation ||
-        quoted.extendedTextMessage?.text ||
-        '';
-    return text.trim() ? { text: text.trim() } : null;
-}
 
 
 async function sendViewOnceCopy(EliteProTech, q, target, m) {
