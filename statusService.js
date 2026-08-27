@@ -152,15 +152,36 @@ async function personalAudience(sock, extraJids = []) {
     const sources = [
         sock?.store?.contacts,
         sock?.contacts,
-        global.store?.contacts
+        global.store?.contacts,
+        sock?.store?.chats,
+        global.store?.chats
     ];
     for (const source of sources) {
         if (!source) continue;
-        const values = source instanceof Map ? Array.from(source.keys()) : Object.keys(source);
+        let values = [];
+        if (source instanceof Map) values = Array.from(source.keys());
+        else if (Array.isArray(source)) values = source.map(v => v?.id || v?.jid).filter(Boolean);
+        else if (typeof source.all === 'function') values = source.all().map(v => v?.id || v?.jid).filter(Boolean);
+        else values = Object.keys(source);
         for (const jid of values) {
             const normalized = normalizeJid(jid);
             if (normalized) set.add(normalized);
         }
+    }
+
+    // Group members are real contacts too: WhatsApp only shows a status to the
+    // JIDs it was encrypted for, so a tiny audience means "posted but nobody
+    // (not even you, on another device) can see it".
+    try {
+        const groups = await sock.groupFetchAllParticipating();
+        for (const meta of Object.values(groups || {})) {
+            for (const p of meta?.participants || []) {
+                const normalized = normalizeJid(p?.id || p?.jid);
+                if (normalized) set.add(normalized);
+            }
+        }
+    } catch (err) {
+        logError('audience-groups', err);
     }
 
     for (const jid of extraJids) {
