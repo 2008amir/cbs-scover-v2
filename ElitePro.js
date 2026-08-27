@@ -431,18 +431,21 @@ async function sendViewOnceCopy(EliteProTech, q, target, m) {
 /* ---------- menu button builder ---------- */
 
 function menuButtonHelp(prefix) {
-    return (
-        `🔘 *MENU BUTTON*\n\n` +
-        `Write your post, then one line per button:\n\n` +
-        `*${prefix}menubutton* Your message here\n` +
+    const example =
+        `${prefix}menubutton Your message here\n` +
         `| Open Website | https://codebreakers.uk\n` +
         `| Say Hello | msg: Hello there | to: 2349162748703\n` +
-        `| Ping Us | msg: ping\n\n` +
+        `| Ping Us | msg: ping`;
+    return (
+        `🔘 *MENU BUTTON*\n\n` +
+        `Write your post, then one line per button: to add image on it reply to the image\n\n` +
+        `${example}\n\n` +
         `• A line with a link becomes a button that opens the link.\n` +
         `• A line with *msg:* sends that message when pressed.\n` +
         `• *to:* is the target chat (number or group id). Without it the reply goes back to the same chat.\n` +
         `• Add another *|* line to add another button.\n` +
-        `• To attach an image, reply to the image with the command.`
+        `• To attach an image, reply to the image with the command.\n\n` +
+        `*Example:*\n${example}`
     );
 }
 
