@@ -997,6 +997,41 @@ async function handleExtraCommands(EliteProTech, m) {
     }
 
 
+    /* ---------- DEBUG ---------- */
+    if (command === 'debug') {
+        const what = args.toLowerCase().split(/ +/)[0];
+        if (what === 'menubutton' || what === 'buttons') {
+            const dbg = global.lastButtonDebug;
+            if (!dbg) {
+                await reply('🔍 No button message has been sent yet in this session.\nSend a *.menubutton* or *.menu* command first, then run this again.');
+                return true;
+            }
+            const payloadJson = (() => {
+                try { return JSON.stringify(dbg.payload, null, 2); }
+                catch { return String(dbg.payload); }
+            })();
+            const buttonsJson = (() => {
+                try { return JSON.stringify(dbg.buttons, null, 2); }
+                catch { return String(dbg.buttons); }
+            })();
+            await reply(
+                `🔍 *MENUBUTTON DEBUG*\n\n` +
+                `• Shape sent: *${dbg.shape}*\n` +
+                `• To: ${dbg.jid}\n` +
+                `• At: ${dbg.at}\n\n` +
+                (dbg.errors.length ? `*Errors (tried shapes):*\n${dbg.errors.map(e => '• ' + e).join('\n')}\n\n` : '*Errors:* none — first shape relayed OK.\n\n') +
+                `*Buttons payload:*\n\`\`\`${buttonsJson.slice(0, 1500)}\`\`\``
+            );
+            // Payload is long — send it as a second message so nothing is truncated away.
+            for (let i = 0; i < payloadJson.length; i += 3500) {
+                await EliteProTech.sendMessage(m.chat, { text: `*Sent message payload (${Math.floor(i / 3500) + 1}):*\n\`\`\`${payloadJson.slice(i, i + 3500)}\`\`\`` }, { quoted: m });
+            }
+            return true;
+        }
+        await reply(`🔍 *DEBUG*\n\nAvailable:\n• *${prefix}debug menubutton* — shows the exact JSON payload and which message shape (native interactive / viewOnce / legacy template) the last button message used.`);
+        return true;
+    }
+
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
         console.log(`[menubutton] command from ${m.sender || m.chat} in ${m.chat} (${args.length} chars)`);
