@@ -397,10 +397,11 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
 
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
+        const chatDisabled = chatbotData.disabled?.[from] === true;
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
-        // "chatbot dm on" / "chatbot group on" work on their own — no per-user
-        // opt-in needed, and group chats are answered exactly like DMs.
-        if (chatbotData.global !== true && !typeEnabled && !chatEnabled) return;
+        // Per-chat switch wins. A chat switched off (or where love/friend was
+        // switched off) stays off until it is switched on again by command.
+        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) return;
 
         const text = extractText(mek);
         const isVoice = !!voiceNode(mek);
