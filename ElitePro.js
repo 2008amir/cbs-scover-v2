@@ -659,29 +659,28 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
         return proto.Message.InteractiveMessage.create(interactive);
     };
 
-    const ctx = {
-        deviceListMetadata: {},
-        deviceListMetadataVersion: 2
-    };
+    // NOTE: a fake/empty `messageContextInfo.deviceListMetadata` makes the
+    // recipient unable to decrypt the payload — that is what produced the
+    // "Waiting for this message. This may take a while." bubble. It is left
+    // out on purpose; Baileys fills the real context itself.
 
     const shapes = [
-        // 1) Plain interactive message (renders on current personal WhatsApp builds).
-        () => ({
-            messageContextInfo: ctx,
-            interactiveMessage: buildInteractive()
-        }),
-        // 2) viewOnce-wrapped interactive message (older / some Android builds).
+        // 1) viewOnce-wrapped interactive message — the shape current WhatsApp
+        //    builds actually render buttons for.
         () => ({
             viewOnceMessage: {
                 message: {
-                    messageContextInfo: ctx,
                     interactiveMessage: buildInteractive()
                 }
             }
+        }),
+        // 2) Plain interactive message.
+        () => ({
+            interactiveMessage: buildInteractive()
         })
     ];
 
-    const shapeNames = ['native interactive', 'viewOnce'];
+    const shapeNames = ['viewOnce interactive', 'native interactive'];
     const dbg = { at: new Date().toISOString(), jid, body, buttons, shape: null, payload: null, errors: [] };
     global.lastButtonDebug = dbg;
 
