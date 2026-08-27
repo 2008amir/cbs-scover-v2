@@ -701,43 +701,31 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
 
     const img = typeof image === 'string' ? { url: image } : image;
 
-    // 1) The menu itself ALWAYS goes out first as a plain image + caption.
-    //    Interactive messages are silently dropped by some WhatsApp builds,
-    //    which is why the menu sometimes never appeared.
-    let sent = false;
-    try {
-        await EliteProTech.sendMessage(m.chat, { image: img, caption }, { quoted: m });
-        sent = true;
-    } catch (err) {
-        console.error('Menu image failed, sending text menu:', err?.message || err);
-    }
-    if (!sent) {
-        try {
-            await EliteProTech.sendMessage(m.chat, { text: caption }, { quoted: m });
-            sent = true;
-        } catch (err) {
-            console.error('Text menu failed too:', err?.message || err);
-        }
-    }
-
-    // 2) Then the group / channel links as real tappable buttons. The sender
-    //    tries several message shapes (plain interactive, viewOnce-wrapped,
-    //    legacy template buttons) and only gives up when all of them fail.
+    // 1) One single message: the menu image + the full command list + the
+    //    group / channel buttons underneath. This is what WhatsApp shows for
+    //    a normal button post, so the menu and the buttons arrive together.
     try {
         if (typeof global.sendNativeFlow === 'function') {
             await global.sendNativeFlow(EliteProTech, m.chat, {
-                body: '🔗 *CBS-SCOVER LINKS*',
+                body: caption,
                 buttons: buttonsRow,
+                image: img,
                 quoted: m
             });
             return;
         }
     } catch (err) {
-        console.error('Interactive link buttons unavailable, falling back:', err?.message || err);
+        console.error('Menu buttons unavailable, falling back to plain menu:', err?.message || err);
     }
 
+    // 2) Fallback: plain image + caption, then the links as text.
+    try {
+        await EliteProTech.sendMessage(m.chat, { image: img, caption }, { quoted: m });
+    } catch (err) {
+        console.error('Menu image failed, sending text menu:', err?.message || err);
+        await EliteProTech.sendMessage(m.chat, { text: caption }, { quoted: m }).catch(() => {});
+    }
 
-    // 3) Last resort: plain links.
     await EliteProTech.sendMessage(
         m.chat,
         { text: `👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}` }
