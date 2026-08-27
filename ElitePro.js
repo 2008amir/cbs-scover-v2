@@ -428,7 +428,10 @@ async function sendViewOnceCopy(EliteProTech, q, target, m) {
     throw new Error('unsupported view once content');
 }
 
-/* ---------- menu button builder ---------- */
+/* ============================ MENU BUTTON ============================
+   Stateless: every invocation parses its own message from scratch. No
+   "first run" flags, no module-level parser state.
+   ==================================================================== */
 
 function menuButtonHelp(prefix) {
     const example =
@@ -445,133 +448,292 @@ function menuButtonHelp(prefix) {
         `• *to:* is the target chat (number or group id). Without it the reply goes back to the same chat.\n` +
         `• Add another *|* line to add another button.\n` +
         `• To attach an image, reply to the image with the command.\n\n` +
-        `*Example:*\n${example}`
+        `${example}`
     );
-}
-
-function parseMenuButton(args) {
-    const lines = String(args || '').split('\n');
-    const bodyLines = [];
-    const buttons = [];
-    const plain = [];      // human readable fallback list
-    const errors = [];
-    const store = readJson(MENU_BUTTON_FILE, {});
-
-    lines.forEach((raw, i) => {
-        const lineNo = i + 1;
-        const line = raw.trim();
-        if (!line.includes('|')) {
-            bodyLines.push(raw);
-            return;
-        }
-        if (!line.startsWith('|')) {
-            errors.push(`Line ${lineNo}: "${line}" — a button line must *start* with "|". Use: | Label | value`);
-            return;
-        }
-        const parts = line.slice(1).split('|').map(p => p.trim()).filter(Boolean);
-        if (!parts.length) {
-            errors.push(`Line ${lineNo}: "${line}" — empty button. Use: | Label | value`);
-            return;
-        }
-        if (parts.length < 2) {
-            errors.push(`Line ${lineNo}: "${line}" — missing the value after the label. Use: | ${parts[0]} | https://link  or  | ${parts[0]} | msg: your text`);
-            return;
-        }
-        const label = parts[0].slice(0, 25);
-        const url = parts.find(p => /^https?:\/\//i.test(p));
-        if (url) {
-            buttons.push({
-                name: 'cta_url',
-                buttonParamsJson: JSON.stringify({ display_text: label, url, merchant_url: url })
-            });
-            plain.push(`🔗 ${label} → ${url}`);
-            return;
-        }
-        const msgPart = parts.find(p => /^msg:/i.test(p));
-        const toPart = parts.find(p => /^to:/i.test(p));
-        if (!msgPart) {
-            errors.push(`Line ${lineNo}: "${line}" — the value must be a link (https://...) or start with *msg:*. Example: | ${label} | msg: Hello there`);
-            return;
-        }
-        const text = msgPart.replace(/^msg:/i, '').trim();
-        if (!text) {
-            errors.push(`Line ${lineNo}: "${line}" — *msg:* has no text after it.`);
-            return;
-        }
-        let to = null;
-        if (toPart) {
-            const rawTo = toPart.replace(/^to:/i, '').trim();
-            to = normalizeJid(rawTo);
-            if (!to) {
-                errors.push(`Line ${lineNo}: "${line}" — *to:* "${rawTo}" is not a valid number or group id.`);
-                return;
-            }
-        }
-        const id = `mbtn_${Date.now()}_${buttons.length}`;
-        store[id] = { text, to };
-        buttons.push({
-            name: 'quick_reply',
-            buttonParamsJson: JSON.stringify({ display_text: label, id })
-        });
-        plain.push(`💬 ${label} → ${text}${to ? ` (to ${to.split('@')[0]})` : ''}`);
-    });
-
-    writeJson(MENU_BUTTON_FILE, store);
-    return { body: bodyLines.join('\n').trim() || ' ', buttons, errors, plain };
 }
 
 function normalizeJid(value) {
     const v = String(value || '').trim();
     if (!v) return null;
-    if (v.includes('@')) return v;
+    if (v.includes('@')) {
+        const [num, server] = v.split('@');
+        if (!/^[0-9-]{5,32}$/.test(num)) return null;
+        return `${num}@${server || 's.whatsapp.net'}`;
+    }
+    if (/^[0-9-]{10,}$/.test(v) && v.includes('-')) return `${v}@g.us`;   // group id form
     const digits = v.replace(/\D/g, '');
-    return digits ? `${digits}@s.whatsapp.net` : null;
+    if (digits.length < 7 || digits.length > 16) return null;
+    return `${digits}@s.whatsapp.net`;
 }
 
-async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
+function isHttpUrl(value) {
+    if (!/^https?:\/\//i.test(value)) return false;
+    try {
+        const u = new URL(value);
+        return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname && u.hostname.includes('.');
+    } catch {
+        return false;
+    }
+}
+
+function formatError(lineNo, line, reason, expected) {
+    return (
+        `❌ *Menu formatting error*\n\n` +
+        `Invalid line ${lineNo}:\n${line}\n\n` +
+        `Reason:\n${reason}\n\n` +
+        `Expected:\n${expected}\n\n` +
+        `Please correct this line and try again.`
+    );
+}
+
+const SUPPORTED =
+    `Supported values:\n` +
+    `• https://example.com\n` +
+    `• msg: Your message\n` +
+    `• msg: Your message | to: 234xxxxxxxxxx`;
+
+/**
+ * Parses the body of a .menubutton command, line by line.
+ * Returns { ok, error, title, items } — items describe the actions and are
+ * only persisted by the caller once the whole message validated.
+ */
+function parseMenuButton(args) {
+    const lines = String(args || '').split('\n');
+    const titleLines = [];
+    const items = [];
+    let seenRow = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const lineNo = i + 1;            // line 1 is the ".menubutton ..." line
+        const raw = lines[i];
+        const line = raw.trim();
+
+        if (!line) {
+            if (!seenRow) titleLines.push(raw);
+            continue;
+        }
+
+        if (!line.includes('|')) {
+            if (seenRow) {
+                return {
+                    ok: false,
+                    error: formatError(
+                        lineNo, line,
+                        'This line is not a menu row. Every line after the first button must start with "|".',
+                        '| Label | value'
+                    )
+                };
+            }
+            titleLines.push(raw);
+            continue;
+        }
+
+        if (!line.startsWith('|')) {
+            return {
+                ok: false,
+                error: formatError(lineNo, line, 'A menu row must start with "|".', '| Label | value')
+            };
+        }
+
+        seenRow = true;
+        const parts = line.slice(1).split('|').map(p => p.trim());
+        const label = (parts.shift() || '').trim();
+        if (!label) {
+            return {
+                ok: false,
+                error: formatError(lineNo, line, 'The menu label is missing.', '| Label | value')
+            };
+        }
+
+        const values = parts.filter(p => p.length);
+        if (!values.length) {
+            return {
+                ok: false,
+                error: formatError(lineNo, line, 'The menu value is missing.', '| Label | value')
+            };
+        }
+
+        const url = values.find(v => /^https?:\/\//i.test(v));
+        if (url) {
+            if (!isHttpUrl(url)) {
+                return {
+                    ok: false,
+                    error: formatError(lineNo, line, `"${url}" is not a valid HTTP/HTTPS URL.`, '| Label | https://example.com')
+                };
+            }
+            items.push({ type: 'url', label: label.slice(0, 25), url });
+            continue;
+        }
+
+        const msgPart = values.find(v => /^msg\s*:/i.test(v));
+        if (!msgPart) {
+            const looksLikeUrl = values.some(v => /^(www\.|[a-z0-9-]+\.[a-z]{2,})/i.test(v));
+            return {
+                ok: false,
+                error: formatError(
+                    lineNo, line,
+                    looksLikeUrl
+                        ? 'A website value must be a full HTTP/HTTPS URL.'
+                        : 'Unsupported menu action.',
+                    SUPPORTED
+                )
+            };
+        }
+
+        const text = msgPart.replace(/^msg\s*:/i, '').trim();
+        if (!text) {
+            return {
+                ok: false,
+                error: formatError(lineNo, line, 'The msg: value has no message text.', '| Label | msg: Your message')
+            };
+        }
+
+        let to = null;
+        const toPart = values.find(v => /^to\s*:/i.test(v));
+        if (toPart) {
+            const rawTo = toPart.replace(/^to\s*:/i, '').trim();
+            if (!rawTo) {
+                return {
+                    ok: false,
+                    error: formatError(lineNo, line, 'The to: recipient is missing.', '| Label | msg: Your message | to: 234xxxxxxxxxx')
+                };
+            }
+            to = normalizeJid(rawTo);
+            if (!to) {
+                return {
+                    ok: false,
+                    error: formatError(lineNo, line, `"${rawTo}" is not a valid phone number or group id.`, '| Label | msg: Your message | to: 234xxxxxxxxxx')
+                };
+            }
+        }
+
+        items.push({ type: 'msg', label: label.slice(0, 25), text, to });
+    }
+
+    if (!items.length) {
+        return {
+            ok: false,
+            error:
+                `❌ *Menu formatting error*\n\nNo menu row found.\n\n` +
+                `Add at least one line:\n| Label | value\n\n${SUPPORTED}`
+        };
+    }
+
+    return { ok: true, title: titleLines.join('\n').trim(), items };
+}
+
+// Persist quick-reply actions and build the native flow buttons.
+function buildButtons(items) {
+    const store = readJson(MENU_BUTTON_FILE, {});
+    // keep the store small: drop entries older than 30 days
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    for (const [k, v] of Object.entries(store)) {
+        if (v && typeof v === 'object' && v.at && v.at < cutoff) delete store[k];
+    }
+
+    const buttons = [];
+    const plain = [];
+    items.forEach((item, i) => {
+        if (item.type === 'url') {
+            buttons.push({
+                name: 'cta_url',
+                buttonParamsJson: JSON.stringify({
+                    display_text: item.label,
+                    url: item.url,
+                    merchant_url: item.url
+                })
+            });
+            plain.push(`🔗 ${item.label} → ${item.url}`);
+            return;
+        }
+        const id = `mbtn_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 7)}`;
+        store[id] = { text: item.text, to: item.to, at: Date.now() };
+        buttons.push({
+            name: 'quick_reply',
+            buttonParamsJson: JSON.stringify({ display_text: item.label, id })
+        });
+        plain.push(`💬 ${item.label} → ${item.text}${item.to ? ` (to ${item.to.split('@')[0]})` : ''}`);
+    });
+
+    writeJson(MENU_BUTTON_FILE, store);
+    return { buttons, plain };
+}
+
+/**
+ * Sends a native-flow interactive message. WhatsApp only renders native flow
+ * buttons when the interactive message carries messageContextInfo and is
+ * wrapped in viewOnceMessage — without it relayMessage "succeeds" but the
+ * client shows nothing at all. That was the reason menus never appeared.
+ */
+async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image, quoted }) {
     const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = require('baileys');
 
-    const buildInteractive = async (wrapViewOnce) => {
-        const interactive = {
-            body: proto.Message.InteractiveMessage.Body.create({ text: body }),
-            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons })
-        };
-        if (image) {
-            const media = await prepareWAMessageMedia({ image }, { upload: EliteProTech.waUploadToServer });
-            interactive.header = proto.Message.InteractiveMessage.Header.create({ hasMediaAttachment: true, ...media });
-        }
-        const inner = { interactiveMessage: proto.Message.InteractiveMessage.create(interactive) };
-        const content = wrapViewOnce ? { viewOnceMessage: { message: inner } } : inner;
-        const msg = generateWAMessageFromContent(
-            m.chat,
-            proto.Message.fromObject(content),
-            { userJid: EliteProTech.user?.id || m.chat, quoted: m }
-        );
-        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
+    const interactive = {
+        body: proto.Message.InteractiveMessage.Body.create({ text: body || ' ' }),
+        footer: proto.Message.InteractiveMessage.Footer.create({ text: footer || '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+            buttons,
+            messageParamsJson: ''
+        })
     };
 
-    // 1) plain interactive message (renders on most clients)
+    if (image) {
+        const media = await prepareWAMessageMedia(
+            { image: typeof image === 'string' ? { url: image } : image },
+            { upload: EliteProTech.waUploadToServer }
+        );
+        interactive.header = proto.Message.InteractiveMessage.Header.create({
+            hasMediaAttachment: true,
+            ...media
+        });
+    }
+
+    const inner = {
+        messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2
+        },
+        interactiveMessage: proto.Message.InteractiveMessage.create(interactive)
+    };
+
+    const msg = generateWAMessageFromContent(
+        jid,
+        proto.Message.fromObject({ viewOnceMessage: { message: inner } }),
+        { userJid: EliteProTech.user?.id || jid, quoted }
+    );
+    await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
+    return msg;
+}
+global.sendNativeFlow = sendNativeFlow;
+
+async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
+    // The post itself always goes out as a normal message first, so the user
+    // never ends up with nothing when the client drops interactive content.
+    const listed = (plain && plain.length) ? `\n\n${plain.join('\n')}` : '';
     try {
-        await buildInteractive(false);
+        if (image) {
+            await EliteProTech.sendMessage(m.chat, { image, caption: body }, { quoted: m });
+        } else {
+            await EliteProTech.sendMessage(m.chat, { text: body }, { quoted: m });
+        }
+    } catch (err) {
+        console.error('[menubutton] post send failed:', err?.message || err);
+    }
+
+    try {
+        await sendNativeFlow(EliteProTech, m.chat, {
+            body: '🔘 Tap an option below',
+            buttons,
+            quoted: m
+        });
+        console.log(`[menubutton] interactive sent to ${m.chat} (${buttons.length} buttons)`);
         return 'interactive';
     } catch (err) {
-        console.error('menubutton interactive failed:', err?.message || err);
+        console.error('[menubutton] interactive send failed:', err?.message || err);
     }
-    // 2) the same wrapped in viewOnce (older clients)
-    try {
-        await buildInteractive(true);
-        return 'interactive-viewonce';
-    } catch (err) {
-        console.error('menubutton viewonce failed:', err?.message || err);
-    }
-    // 3) last resort: the post plus the button list as text, so it is never lost
-    const listed = (plain && plain.length) ? `\n\n${plain.join('\n')}` : '';
-    if (image) {
-        await EliteProTech.sendMessage(m.chat, { image, caption: `${body}${listed}` }, { quoted: m });
-    } else {
-        await EliteProTech.sendMessage(m.chat, { text: `${body}${listed}` }, { quoted: m });
-    }
+
+    await EliteProTech.sendMessage(m.chat, { text: `🔘 *OPTIONS*${listed}` }, { quoted: m })
+        .catch(e => console.error('[menubutton] text fallback failed:', e?.message || e));
     return 'text';
 }
 
@@ -579,26 +741,41 @@ async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
 // Runs when someone presses one of the generated buttons.
 async function handleButtonPress(EliteProTech, m) {
     const msg = m?.message || {};
-    const id =
+    let id =
         msg.templateButtonReplyMessage?.selectedId ||
         msg.buttonsResponseMessage?.selectedButtonId ||
-        (() => {
-            const raw = msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-            if (!raw) return null;
-            try { return JSON.parse(raw)?.id || null; } catch { return null; }
-        })();
+        msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        null;
+
+    if (!id) {
+        const raw =
+            msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+            msg.interactiveResponseMessage?.body?.text ||
+            null;
+        if (raw) {
+            try { id = JSON.parse(raw)?.id || null; } catch { id = null; }
+        }
+    }
     if (!id || !String(id).startsWith('mbtn_')) return false;
 
     const store = readJson(MENU_BUTTON_FILE, {});
     const action = store[id];
-    if (!action) return false;
+    if (!action) {
+        console.log(`[menubutton] pressed unknown action ${id}`);
+        return false;
+    }
 
-    const target = action.to || m.chat;
-    await EliteProTech.sendMessage(target, { text: action.text }).catch(err =>
-        console.error('button action failed:', err?.message || err)
-    );
+    const target = action.to && normalizeJid(action.to) ? normalizeJid(action.to) : m.chat;
+    try {
+        await EliteProTech.sendMessage(target, { text: action.text });
+        console.log(`[menubutton] action ${id} delivered to ${target}`);
+    } catch (err) {
+        console.error('[menubutton] action failed:', err?.message || err);
+        await EliteProTech.sendMessage(m.chat, { text: `❌ Could not deliver that button message.` }).catch(() => {});
+    }
     return true;
 }
+
 
 async function handleExtraCommands(EliteProTech, m) {
 
