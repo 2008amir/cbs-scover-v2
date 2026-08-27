@@ -287,36 +287,48 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
         const keyIndex = (global.geminiKeyIndex + k) % total;
         const key = GEMINI_API_KEYS[keyIndex];
         if (GEMINI_DEAD_KEYS.has(key)) continue;
+        let keyDead = false;
         for (const model of GEMINI_MODELS) {
-            try {
-                const { data } = await axios.post(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
-                    body,
-                    { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-                );
-                const out = (data?.candidates?.[0]?.content?.parts || [])
-                    .map(p => p?.text || '').join('').trim();
-                if (out) {
-                    global.geminiKeyIndex = keyIndex; // remember the working key
-                    return out;
-                }
-                lastError = new Error('empty gemini response');
-            } catch (err) {
-                // Silent fallback: move on to the next model, then the next key.
-                lastError = err;
-                const status = err?.response?.status;
-                const message = String(err?.response?.data?.error?.message || '');
-                // A revoked / leaked / invalid key never recovers — retire it
-                // for this process so it is not tried again on every message.
-                if (status === 400 || status === 403) {
-                    GEMINI_DEAD_KEYS.add(key);
-                    if (/leaked|revoked|invalid|expired|not valid/i.test(message)) leaked = true;
-                    console.warn(`Gemini: key #${keyIndex + 1} disabled by Google (${status}). Skipping it from now on.`);
-                    break; // no point trying other models with a dead key
+            if (keyDead) break;
+            let authFailures = 0;
+            const variants = geminiAuthVariants(key);
+            for (const variant of variants) {
+                try {
+                    const { data } = await axios.post(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent${variant.query}`,
+                        body,
+                        {
+                            headers: { 'Content-Type': 'application/json', ...variant.headers },
+                            timeout: 120000
+                        }
+                    );
+                    const out = (data?.candidates?.[0]?.content?.parts || [])
+                        .map(p => p?.text || '').join('').trim();
+                    if (out) {
+                        global.geminiKeyIndex = keyIndex; // remember the working key
+                        return out;
+                    }
+                    lastError = new Error('empty gemini response');
+                } catch (err) {
+                    // Silent fallback: next auth style, then next model, then next key.
+                    lastError = err;
+                    const status = err?.response?.status;
+                    const message = String(err?.response?.data?.error?.message || '');
+                    if (status === 401 || status === 403 || status === 400) authFailures++;
+                    // A revoked / leaked key never recovers — retire it for this
+                    // process, but only once BOTH auth styles were refused.
+                    if (authFailures >= variants.length && (status === 400 || status === 401 || status === 403)) {
+                        GEMINI_DEAD_KEYS.add(key);
+                        keyDead = true;
+                        if (/leaked|revoked|invalid|expired|not valid|credential/i.test(message)) leaked = true;
+                        console.warn(`Gemini: key #${keyIndex + 1} refused by Google (${status}). Skipping it from now on.`);
+                        break;
+                    }
                 }
             }
         }
     }
+
     // Every key failed — stop here instead of retrying in a loop.
     console.error('Gemini error (all keys failed):', lastError?.response?.data?.error?.message || lastError?.message);
     if (leaked || GEMINI_DEAD_KEYS.size >= total) {
