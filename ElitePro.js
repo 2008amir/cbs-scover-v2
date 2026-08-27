@@ -919,44 +919,41 @@ async function handleExtraCommands(EliteProTech, m) {
 
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
+        console.log(`[menubutton] command from ${m.sender || m.chat} in ${m.chat} (${args.length} chars)`);
         if (!args) {
             await reply(menuButtonHelp(prefix));
             return true;
         }
+
         const parsed = parseMenuButton(args);
-
-        if (parsed.errors.length) {
-            await reply(
-                `⚠️ *MENU BUTTON — formatting problem*\n\n${parsed.errors.join('\n\n')}\n\n` +
-                `Correct format:\n| Label | https://link\n| Label | msg: your text | to: 2349162748703`
-            );
-            if (!parsed.buttons.length) return true;
-        }
-
-        if (!parsed.buttons.length) {
-            await reply(
-                `⚠️ No button line found.\nAdd at least one line starting with *|*, for example:\n` +
-                `| Open Website | https://codebreakers.uk\n\n` +
-                menuButtonHelp(prefix)
-            );
+        if (!parsed.ok) {
+            console.log(`[menubutton] validation failed for ${m.chat}`);
+            await reply(parsed.error);
             return true;
         }
+        console.log(`[menubutton] parsed ${parsed.items.length} items for ${m.chat}`);
 
         try {
+            const { buttons, plain } = buildButtons(parsed.items);
             const q = quotedInfo(m);
             let image = null;
             if (q && unwrap(q.message).imageMessage) {
-                image = await downloadQuoted(EliteProTech, q).catch(() => null);
+                image = await downloadQuoted(EliteProTech, q).catch(err => {
+                    console.error('[menubutton] image download failed:', err?.message || err);
+                    return null;
+                });
             } else if (unwrap(m.message || {}).imageMessage) {
                 image = await downloadQuoted(EliteProTech, { message: m.message, key: m.key }).catch(() => null);
             }
-            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image, parsed.plain);
+            const how = await sendButtonPost(EliteProTech, m, parsed.title || '🔘 Menu', buttons, image, plain);
+            console.log(`[menubutton] delivered via ${how}`);
         } catch (err) {
-            console.error('menubutton error:', err?.message || err);
+            console.error('[menubutton] send error:', err?.message || err);
             await reply(`❌ Failed to send the button message.\n${err?.message || err}`);
         }
         return true;
     }
+
 
 
     /* ---------- VIEW ONCE TO DM ---------- */
