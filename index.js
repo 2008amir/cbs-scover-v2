@@ -13,19 +13,33 @@ global.groupLink = GROUP_LINK;
 global.channelLink = CHANNEL_LINK;
 
 // ===== Gemini chatbot =====
-// Multiple keys: if one fails (quota, invalid, rate limit) the next is tried
-// silently. Only when every key has failed does the chatbot give up.
-const GEMINI_API_KEYS = [
-    'AQ.Ab8RN6LvB5tvJ0UFa5OEhiBySoBw88w66PUy0eemRQdY5Z7nZA',
-    'AQ.Ab8RN6K0wycDkwHpCrO9nqZYPQWVRy7lRTvpR9UKmQ-JHT3HMQ',
-    'AQ.Ab8RN6KJX6HsIu7LuD0mpVOPhuh2cTn6BeOGKRRdYM3XqD6A6A',
-    'AQ.Ab8RN6IaWdBeFHrX7G9pvf57gbPPeaAuxkId_dyrF-6yPtcQiA',
-    'AQ.Ab8RN6JsYbC86DFizhsDaS4u1ozEcW7FFmcLGfzp0vs1z0c_dA',
-    'AIzaSyBnNHXQ5CrR_e5YrYnZnGa8_fqv34mc01c'
-];
+// Keys are read from the environment (.env), never hard-coded: keys committed
+// in source get scraped and Google disables them with
+// "Your API key was reported as leaked" (HTTP 403).
+// Set one or more keys in .env:
+//   GEMINI_API_KEY=AIza...
+//   GEMINI_API_KEYS=AIzaKey1,AIzaKey2,AIzaKey3
+try { require('dotenv').config(); } catch {}
+
+const GEMINI_API_KEYS = String(
+    process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || ''
+)
+    .split(/[,\s]+/)
+    .map(k => k.trim())
+    .filter(Boolean);
+
+// Keys WhatsApp-side rotation should skip for the rest of this process:
+// a key revoked as leaked or invalid will never start working again.
+const GEMINI_DEAD_KEYS = new Set();
+
 // Remember which key last worked so the next request starts there.
 global.geminiKeyIndex = global.geminiKeyIndex || 0;
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'];
+
+if (!GEMINI_API_KEYS.length) {
+    console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
+}
+
 
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
@@ -243,12 +257,19 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
         body.systemInstruction = { role: 'user', parts: [{ text: String(systemPrompt).slice(0, 12000) }] };
     }
 
-    let lastError = null;
     const total = GEMINI_API_KEYS.length;
+    if (!total) {
+        console.error('Gemini: no API key configured (set GEMINI_API_KEY in .env).');
+        return '⚠️ The chatbot has no Gemini API key configured. Add GEMINI_API_KEY to the .env file and restart the bot.';
+    }
+
+    let lastError = null;
+    let leaked = false;
     // Start from the key that worked last time, then roll over to the others.
     for (let k = 0; k < total; k++) {
         const keyIndex = (global.geminiKeyIndex + k) % total;
         const key = GEMINI_API_KEYS[keyIndex];
+        if (GEMINI_DEAD_KEYS.has(key)) continue;
         for (const model of GEMINI_MODELS) {
             try {
                 const { data } = await axios.post(
@@ -266,13 +287,27 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
             } catch (err) {
                 // Silent fallback: move on to the next model, then the next key.
                 lastError = err;
+                const status = err?.response?.status;
+                const message = String(err?.response?.data?.error?.message || '');
+                // A revoked / leaked / invalid key never recovers — retire it
+                // for this process so it is not tried again on every message.
+                if (status === 400 || status === 403) {
+                    GEMINI_DEAD_KEYS.add(key);
+                    if (/leaked|revoked|invalid|expired|not valid/i.test(message)) leaked = true;
+                    console.warn(`Gemini: key #${keyIndex + 1} disabled by Google (${status}). Skipping it from now on.`);
+                    break; // no point trying other models with a dead key
+                }
             }
         }
     }
     // Every key failed — stop here instead of retrying in a loop.
-    console.error('Gemini error (all keys failed):', lastError?.response?.data || lastError?.message);
+    console.error('Gemini error (all keys failed):', lastError?.response?.data?.error?.message || lastError?.message);
+    if (leaked || GEMINI_DEAD_KEYS.size >= total) {
+        return '⚠️ The Gemini API key is no longer valid (Google revoked it as leaked). Create a new key at https://aistudio.google.com/apikey, put it in .env as GEMINI_API_KEY and restart the bot.';
+    }
     return 'I could not generate a reply at this time. Please try again.';
 };
+
 
 function extractText(mek) {
     const msg = mek?.message || {};

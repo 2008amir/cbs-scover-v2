@@ -353,51 +353,9 @@ async function padToSquare(buffer) {
     return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
 }
 
-async function groupAudience(EliteProTech, jid) {
-    try {
-        const meta = await EliteProTech.groupMetadata(jid);
-        return (meta?.participants || []).map(p => p.id || p.jid).filter(Boolean);
-    } catch {
-        return [];
-    }
-}
+// Status audience + status content building now live in ./statusService.js so
+// there is exactly one authoritative status implementation.
 
-// Builds a real WhatsApp status payload from a replied message (text, image,
-// video or audio) or from typed text.
-async function buildStatusContent(EliteProTech, m, typedText) {
-    const q = quotedInfo(m);
-    const quoted = q ? unwrap(q.message) : {};
-
-    if (q && (quoted.imageMessage || quoted.videoMessage || quoted.audioMessage)) {
-        const buffer = await downloadQuoted(EliteProTech, q);
-        if (quoted.imageMessage) {
-            return { image: buffer, caption: typedText || quoted.imageMessage.caption || '' };
-        }
-        if (quoted.videoMessage) {
-            return { video: buffer, caption: typedText || quoted.videoMessage.caption || '' };
-        }
-        return {
-            audio: buffer,
-            mimetype: quoted.audioMessage.mimetype || 'audio/mp4',
-            ptt: !!quoted.audioMessage.ptt
-        };
-    }
-
-    const own = unwrap(m.message || {});
-    if (own.imageMessage || own.videoMessage) {
-        const buffer = await downloadQuoted(EliteProTech, { message: m.message, key: m.key });
-        return own.imageMessage
-            ? { image: buffer, caption: typedText }
-            : { video: buffer, caption: typedText };
-    }
-
-    const text =
-        typedText ||
-        quoted.conversation ||
-        quoted.extendedTextMessage?.text ||
-        '';
-    return text.trim() ? { text: text.trim() } : null;
-}
 
 
 async function sendViewOnceCopy(EliteProTech, q, target, m) {
@@ -957,7 +915,7 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
-    /* ---------- GROUP STATUS (real WhatsApp status) ---------- */
+    /* ---------- STATUS (real WhatsApp status, via StatusService) ---------- */
     if (command === 'groupstatus' || command === 'addstatus' || command === 'mystatus') {
         const groupMode = command === 'groupstatus';
         if (groupMode && !isGroupChat) {
@@ -967,34 +925,35 @@ async function handleExtraCommands(EliteProTech, m) {
         const sub = args.toLowerCase().split(/ +/)[0];
         const rest = ['add', 'post', 'upload'].includes(sub) ? args.slice(sub.length).trim() : args.trim();
 
-        try {
-            const audience = groupMode
-                ? await groupAudience(EliteProTech, m.chat)
-                : [ownerJid(EliteProTech), m.sender || m.chat].filter(Boolean);
+        const statusService = require('./statusService');
+        const guardKey = `${command}:${m.key?.id || ''}`;
+        const result = groupMode
+            ? await statusService.publishGroupStatus(EliteProTech, m, rest, { guardKey })
+            : await statusService.publishPersonalStatus(EliteProTech, m, rest, { guardKey });
 
-            const content = await buildStatusContent(EliteProTech, m, rest);
-            if (!content) {
-                await reply(
-                    `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
-                    `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
-                    `or type *${prefix}${command} add <your text>*.`
-                );
-                return true;
-            }
+        if (result.duplicate) return true;
 
-            await EliteProTech.sendMessage('status@broadcast', content, {
-                backgroundColor: '#0a0a0a',
-                font: 3,
-                statusJidList: audience,
-                broadcast: true
-            });
-            await reply(`✅ Posted to ${groupMode ? 'the group status' : 'your status'} (${audience.length} viewers).`);
-        } catch (err) {
-            console.error('groupstatus error:', err?.message || err);
-            await reply(`❌ Could not post the status.\n${err?.message || err}`);
+        if (result.empty) {
+            await reply(
+                `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
+                `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
+                `or type *${prefix}${command} add <your text>*.`
+            );
+            return true;
+        }
+
+        if (result.ok) {
+            await reply(groupMode ? '✅ Group status published successfully.' : '✅ Status published successfully.');
+        } else {
+            await reply(
+                `❌ Status publishing failed.\n\n` +
+                `Stage: ${result.stage}\n` +
+                `Error: ${result.error}`
+            );
         }
         return true;
     }
+
 
 
     /* ---------- DEBUG ---------- */
