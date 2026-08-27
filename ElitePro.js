@@ -230,8 +230,6 @@ function writeJson(file, data) {
 /* ---------- shared helpers for the local commands ---------- */
 
 const USERNAME_FILE = path.join(__dirname, 'database', 'username.json');
-const GROUP_STATUS_FILE = path.join(__dirname, 'database', 'groupstatus.json');
-const MENU_BUTTON_FILE = path.join(__dirname, 'database', 'menubuttons.json');
 
 function ownerJid(EliteProTech) {
     const me = EliteProTech?.user?.id || '';
@@ -353,11 +351,6 @@ async function padToSquare(buffer) {
     return canvas.resize(640, 640).quality(90).getBufferAsync(Jimp.MIME_JPEG);
 }
 
-// Status audience + status content building now live in ./statusService.js so
-// there is exactly one authoritative status implementation.
-
-
-
 async function sendViewOnceCopy(EliteProTech, q, target, m) {
     const message = unwrap(q.message);
     const from = String(q.key.participant || m.chat || '').split('@')[0];
@@ -386,433 +379,6 @@ async function sendViewOnceCopy(EliteProTech, q, target, m) {
     throw new Error('unsupported view once content');
 }
 
-/* ============================ MENU BUTTON ============================
-   Stateless: every invocation parses its own message from scratch. No
-   "first run" flags, no module-level parser state.
-   ==================================================================== */
-
-function menuButtonHelp(prefix) {
-    const example =
-        `${prefix}menubutton Your message here\n` +
-        `| Open Website | https://codebreakers.uk\n` +
-        `| Say Hello | msg: Hello there | to: 2349162748703\n` +
-        `| Ping Us | msg: ping`;
-    return (
-        `🔘 *MENU BUTTON*\n\n` +
-        `Write your post, then one line per button: to add image on it reply to the image\n\n` +
-        `${example}\n\n` +
-        `• A line with a link becomes a button that opens the link.\n` +
-        `• A line with *msg:* sends that message when pressed.\n` +
-        `• *to:* is the target chat (number or group id). Without it the reply goes back to the same chat.\n` +
-        `• Add another *|* line to add another button.\n` +
-        `• To attach an image, reply to the image with the command.\n\n` +
-        `${example}`
-    );
-}
-
-function normalizeJid(value) {
-    const v = String(value || '').trim();
-    if (!v) return null;
-    if (v.includes('@')) {
-        const [num, server] = v.split('@');
-        if (!/^[0-9-]{5,32}$/.test(num)) return null;
-        return `${num}@${server || 's.whatsapp.net'}`;
-    }
-    if (/^[0-9-]{10,}$/.test(v) && v.includes('-')) return `${v}@g.us`;   // group id form
-    const digits = v.replace(/\D/g, '');
-    if (digits.length < 7 || digits.length > 16) return null;
-    return `${digits}@s.whatsapp.net`;
-}
-
-function isHttpUrl(value) {
-    if (!/^https?:\/\//i.test(value)) return false;
-    try {
-        const u = new URL(value);
-        return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname && u.hostname.includes('.');
-    } catch {
-        return false;
-    }
-}
-
-function formatError(lineNo, line, reason, expected) {
-    return (
-        `❌ *Menu formatting error*\n\n` +
-        `Invalid line ${lineNo}:\n${line}\n\n` +
-        `Reason:\n${reason}\n\n` +
-        `Expected:\n${expected}\n\n` +
-        `Please correct this line and try again.`
-    );
-}
-
-const SUPPORTED =
-    `Supported values:\n` +
-    `• https://example.com\n` +
-    `• msg: Your message\n` +
-    `• msg: Your message | to: 234xxxxxxxxxx`;
-
-/**
- * Parses the body of a .menubutton command, line by line.
- * Returns { ok, error, title, items } — items describe the actions and are
- * only persisted by the caller once the whole message validated.
- */
-function parseMenuButton(args) {
-    const lines = String(args || '').split('\n');
-    const titleLines = [];
-    const items = [];
-    let seenRow = false;
-
-    for (let i = 0; i < lines.length; i++) {
-        const lineNo = i + 1;            // line 1 is the ".menubutton ..." line
-        const raw = lines[i];
-        const line = raw.trim();
-
-        if (!line) {
-            if (!seenRow) titleLines.push(raw);
-            continue;
-        }
-
-        if (!line.includes('|')) {
-            if (seenRow) {
-                return {
-                    ok: false,
-                    error: formatError(
-                        lineNo, line,
-                        'This line is not a menu row. Every line after the first button must start with "|".',
-                        '| Label | value'
-                    )
-                };
-            }
-            titleLines.push(raw);
-            continue;
-        }
-
-        if (!line.startsWith('|')) {
-            return {
-                ok: false,
-                error: formatError(lineNo, line, 'A menu row must start with "|".', '| Label | value')
-            };
-        }
-
-        seenRow = true;
-        const parts = line.slice(1).split('|').map(p => p.trim());
-        const label = (parts.shift() || '').trim();
-        if (!label) {
-            return {
-                ok: false,
-                error: formatError(lineNo, line, 'The menu label is missing.', '| Label | value')
-            };
-        }
-
-        const values = parts.filter(p => p.length);
-        if (!values.length) {
-            return {
-                ok: false,
-                error: formatError(lineNo, line, 'The menu value is missing.', '| Label | value')
-            };
-        }
-
-        const url = values.find(v => /^https?:\/\//i.test(v));
-        if (url) {
-            if (!isHttpUrl(url)) {
-                return {
-                    ok: false,
-                    error: formatError(lineNo, line, `"${url}" is not a valid HTTP/HTTPS URL.`, '| Label | https://example.com')
-                };
-            }
-            items.push({ type: 'url', label: label.slice(0, 25), url });
-            continue;
-        }
-
-        const msgPart = values.find(v => /^msg\s*:/i.test(v));
-        if (!msgPart) {
-            const looksLikeUrl = values.some(v => /^(www\.|[a-z0-9-]+\.[a-z]{2,})/i.test(v));
-            return {
-                ok: false,
-                error: formatError(
-                    lineNo, line,
-                    looksLikeUrl
-                        ? 'A website value must be a full HTTP/HTTPS URL.'
-                        : 'Unsupported menu action.',
-                    SUPPORTED
-                )
-            };
-        }
-
-        const text = msgPart.replace(/^msg\s*:/i, '').trim();
-        if (!text) {
-            return {
-                ok: false,
-                error: formatError(lineNo, line, 'The msg: value has no message text.', '| Label | msg: Your message')
-            };
-        }
-
-        let to = null;
-        const toPart = values.find(v => /^to\s*:/i.test(v));
-        if (toPart) {
-            const rawTo = toPart.replace(/^to\s*:/i, '').trim();
-            if (!rawTo) {
-                return {
-                    ok: false,
-                    error: formatError(lineNo, line, 'The to: recipient is missing.', '| Label | msg: Your message | to: 234xxxxxxxxxx')
-                };
-            }
-            to = normalizeJid(rawTo);
-            if (!to) {
-                return {
-                    ok: false,
-                    error: formatError(lineNo, line, `"${rawTo}" is not a valid phone number or group id.`, '| Label | msg: Your message | to: 234xxxxxxxxxx')
-                };
-            }
-        }
-
-        items.push({ type: 'msg', label: label.slice(0, 25), text, to });
-    }
-
-    if (!items.length) {
-        return {
-            ok: false,
-            error:
-                `❌ *Menu formatting error*\n\nNo menu row found.\n\n` +
-                `Add at least one line:\n| Label | value\n\n${SUPPORTED}`
-        };
-    }
-
-    return { ok: true, title: titleLines.join('\n').trim(), items };
-}
-
-// Persist quick-reply actions and build the native flow buttons.
-function buildButtons(items) {
-    const store = readJson(MENU_BUTTON_FILE, {});
-    // keep the store small: drop entries older than 30 days
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    for (const [k, v] of Object.entries(store)) {
-        if (v && typeof v === 'object' && v.at && v.at < cutoff) delete store[k];
-    }
-
-    const buttons = [];
-    const plain = [];
-    items.forEach((item, i) => {
-        if (item.type === 'url') {
-            buttons.push({
-                name: 'cta_url',
-                buttonParamsJson: JSON.stringify({
-                    display_text: item.label,
-                    url: item.url,
-                    merchant_url: item.url
-                })
-            });
-            plain.push(`🔗 ${item.label} → ${item.url}`);
-            return;
-        }
-        const id = `mbtn_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 7)}`;
-        store[id] = { text: item.text, to: item.to, at: Date.now() };
-        buttons.push({
-            name: 'quick_reply',
-            buttonParamsJson: JSON.stringify({ display_text: item.label, id })
-        });
-        plain.push(`💬 ${item.label} → ${item.text}${item.to ? ` (to ${item.to.split('@')[0]})` : ''}`);
-    });
-
-    writeJson(MENU_BUTTON_FILE, store);
-    return { buttons, plain };
-}
-
-/**
- * Sends interactive buttons. WhatsApp is picky here: a native-flow message is
- * silently discarded by the client when messageParamsJson is empty, when the
- * header is missing, or when the wrapper it expects is not used. Different
- * WhatsApp builds accept different wrappers, so we try each known-good shape
- * in order and stop at the first one that relays without throwing.
- */
-async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image, quoted }) {
-    const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = require('baileys');
-
-    const footerText = footer || '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ';
-
-    let headerMedia = null;
-    if (image) {
-        try {
-            headerMedia = await prepareWAMessageMedia(
-                { image: typeof image === 'string' ? { url: image } : image },
-                { upload: EliteProTech.waUploadToServer }
-            );
-        } catch (err) {
-            console.error('[buttons] header media failed:', err?.message || err);
-        }
-    }
-
-    const buildInteractive = () => {
-        const interactive = {
-            body: proto.Message.InteractiveMessage.Body.create({ text: body || ' ' }),
-            footer: proto.Message.InteractiveMessage.Footer.create({ text: footerText }),
-            header: proto.Message.InteractiveMessage.Header.create(
-                headerMedia
-                    ? { title: '', subtitle: '', hasMediaAttachment: true, ...headerMedia }
-                    : { title: '', subtitle: '', hasMediaAttachment: false }
-            ),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-                buttons,
-                // Must be valid JSON — an empty string makes the client drop the message.
-                messageParamsJson: JSON.stringify({ from: 'api', templateId: String(Date.now()) })
-            })
-        };
-        return proto.Message.InteractiveMessage.create(interactive);
-    };
-
-    // NOTE: a fake/empty `messageContextInfo.deviceListMetadata` makes the
-    // recipient unable to decrypt the payload — that is what produced the
-    // "Waiting for this message. This may take a while." bubble. It is left
-    // out on purpose; Baileys fills the real context itself.
-
-    const shapes = [
-        // 1) viewOnce-wrapped interactive message — the shape current WhatsApp
-        //    builds actually render buttons for.
-        () => ({
-            viewOnceMessage: {
-                message: {
-                    interactiveMessage: buildInteractive()
-                }
-            }
-        }),
-        // 2) Plain interactive message.
-        () => ({
-            interactiveMessage: buildInteractive()
-        })
-    ];
-
-    const shapeNames = ['viewOnce interactive', 'native interactive'];
-    const dbg = { at: new Date().toISOString(), jid, body, buttons, shape: null, payload: null, errors: [] };
-    global.lastButtonDebug = dbg;
-
-    let lastErr = null;
-    for (let i = 0; i < shapes.length; i++) {
-        try {
-            const content = shapes[i]();
-            const msg = generateWAMessageFromContent(
-                jid,
-                proto.Message.fromObject(content),
-                { userJid: EliteProTech.user?.id || jid, quoted }
-            );
-            await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
-            dbg.shape = shapeNames[i];
-            dbg.payload = msg.message;
-            console.log(`[buttons] sent using shape ${i + 1} (${shapeNames[i]})`);
-            return msg;
-        } catch (err) {
-            lastErr = err;
-            dbg.errors.push(`${shapeNames[i]}: ${err?.message || err}`);
-            console.error(`[buttons] shape ${i + 1} (${shapeNames[i]}) failed:`, err?.message || err);
-        }
-    }
-
-    // 3) Legacy template buttons — still rendered by a lot of clients.
-    const templateButtons = buttons.map((b, idx) => {
-        let params = {};
-        try { params = JSON.parse(b.buttonParamsJson || '{}'); } catch { params = {}; }
-        if (b.name === 'cta_url' && params.url) {
-            return { index: idx + 1, urlButton: { displayText: params.display_text || 'Open', url: params.url } };
-        }
-        return { index: idx + 1, quickReplyButton: { displayText: params.display_text || 'Option', id: params.id || `btn_${idx}` } };
-    });
-    try {
-        const msg = generateWAMessageFromContent(
-            jid,
-            proto.Message.fromObject({
-                templateMessage: {
-                    hydratedTemplate: {
-                        hydratedContentText: body || ' ',
-                        hydratedFooterText: footerText,
-                        hydratedButtons: templateButtons
-                    }
-                }
-            }),
-            { userJid: EliteProTech.user?.id || jid, quoted }
-        );
-        await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
-        dbg.shape = 'legacy template';
-        dbg.payload = msg.message;
-        console.log('[buttons] sent using legacy template buttons');
-        return msg;
-    } catch (err) {
-        dbg.errors.push(`legacy template: ${err?.message || err}`);
-        dbg.shape = 'failed (all shapes)';
-        console.error('[buttons] template fallback failed:', err?.message || err);
-        throw lastErr || err;
-    }
-}
-global.sendNativeFlow = sendNativeFlow;
-
-
-async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
-    // The post itself always goes out as a normal message first, so the user
-    // never ends up with nothing when the client drops interactive content.
-    const listed = (plain && plain.length) ? `\n\n${plain.join('\n')}` : '';
-    try {
-        if (image) {
-            await EliteProTech.sendMessage(m.chat, { image, caption: body }, { quoted: m });
-        } else {
-            await EliteProTech.sendMessage(m.chat, { text: body }, { quoted: m });
-        }
-    } catch (err) {
-        console.error('[menubutton] post send failed:', err?.message || err);
-    }
-
-    try {
-        await sendNativeFlow(EliteProTech, m.chat, {
-            body: '🔘 Tap an option below',
-            buttons,
-            quoted: m
-        });
-        console.log(`[menubutton] interactive sent to ${m.chat} (${buttons.length} buttons)`);
-        return 'interactive';
-    } catch (err) {
-        console.error('[menubutton] interactive send failed:', err?.message || err);
-    }
-
-    await EliteProTech.sendMessage(m.chat, { text: `🔘 *OPTIONS*${listed}` }, { quoted: m })
-        .catch(e => console.error('[menubutton] text fallback failed:', e?.message || e));
-    return 'text';
-}
-
-
-// Runs when someone presses one of the generated buttons.
-async function handleButtonPress(EliteProTech, m) {
-    const msg = m?.message || {};
-    let id =
-        msg.templateButtonReplyMessage?.selectedId ||
-        msg.buttonsResponseMessage?.selectedButtonId ||
-        msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
-        null;
-
-    if (!id) {
-        const raw =
-            msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-            msg.interactiveResponseMessage?.body?.text ||
-            null;
-        if (raw) {
-            try { id = JSON.parse(raw)?.id || null; } catch { id = null; }
-        }
-    }
-    if (!id || !String(id).startsWith('mbtn_')) return false;
-
-    const store = readJson(MENU_BUTTON_FILE, {});
-    const action = store[id];
-    if (!action) {
-        console.log(`[menubutton] pressed unknown action ${id}`);
-        return false;
-    }
-
-    const target = action.to && normalizeJid(action.to) ? normalizeJid(action.to) : m.chat;
-    try {
-        await EliteProTech.sendMessage(target, { text: action.text });
-        console.log(`[menubutton] action ${id} delivered to ${target}`);
-    } catch (err) {
-        console.error('[menubutton] action failed:', err?.message || err);
-        await EliteProTech.sendMessage(m.chat, { text: `❌ Could not deliver that button message.` }).catch(() => {});
-    }
-    return true;
-}
-
 
 async function handleExtraCommands(EliteProTech, m) {
 
@@ -820,8 +386,6 @@ async function handleExtraCommands(EliteProTech, m) {
     const body = extractBody(m);
     if (!body || !body.startsWith(prefix)) return false;
 
-    // Split on any whitespace (including newlines) so multi-line commands like
-    // ".menubutton ...\n| Label | value" are recognised.
     const rest = body.slice(prefix.length).replace(/^\s+/, '');
     const command = (rest.split(/\s+/)[0] || '').toLowerCase();
     const args = rest.slice(command.length).replace(/^[^\S\n]+/, '').replace(/^\n/, '').trim();
@@ -910,119 +474,6 @@ async function handleExtraCommands(EliteProTech, m) {
         } catch (err) {
             console.error('grouppp error:', err?.message || err);
             await reply(`❌ Could not set the group picture.\n${err?.message || err}\n\nI must be a group admin to change it.`);
-        }
-        return true;
-    }
-
-    /* ---------- STATUS (real WhatsApp status, via StatusService) ---------- */
-    if (command === 'groupstatus' || command === 'addstatus' || command === 'mystatus') {
-        const groupMode = command === 'groupstatus';
-        if (groupMode && !isGroupChat) {
-            await reply('ℹ️ Use this command inside a group.');
-            return true;
-        }
-        const sub = args.toLowerCase().split(/ +/)[0];
-        const rest = ['add', 'post', 'upload'].includes(sub) ? args.slice(sub.length).trim() : args.trim();
-
-        const statusService = require('./statusService');
-        const guardKey = `${command}:${m.key?.id || ''}`;
-        const result = groupMode
-            ? await statusService.publishGroupStatus(EliteProTech, m, rest, { guardKey })
-            : await statusService.publishPersonalStatus(EliteProTech, m, rest, { guardKey });
-
-        if (result.duplicate) return true;
-
-        if (result.empty) {
-            await reply(
-                `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
-                `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
-                `or type *${prefix}${command} add <your text>*.`
-            );
-            return true;
-        }
-
-        if (result.ok) {
-            await reply(groupMode ? '✅ Group status published successfully.' : '✅ Status published successfully.');
-        } else {
-            await reply(
-                `❌ Status publishing failed.\n\n` +
-                `Stage: ${result.stage}\n` +
-                `Error: ${result.error}`
-            );
-        }
-        return true;
-    }
-
-
-
-    /* ---------- DEBUG ---------- */
-    if (command === 'debug') {
-        const what = args.toLowerCase().split(/ +/)[0];
-        if (what === 'menubutton' || what === 'buttons') {
-            const dbg = global.lastButtonDebug;
-            if (!dbg) {
-                await reply('🔍 No button message has been sent yet in this session.\nSend a *.menubutton* or *.menu* command first, then run this again.');
-                return true;
-            }
-            const payloadJson = (() => {
-                try { return JSON.stringify(dbg.payload, null, 2); }
-                catch { return String(dbg.payload); }
-            })();
-            const buttonsJson = (() => {
-                try { return JSON.stringify(dbg.buttons, null, 2); }
-                catch { return String(dbg.buttons); }
-            })();
-            await reply(
-                `🔍 *MENUBUTTON DEBUG*\n\n` +
-                `• Shape sent: *${dbg.shape}*\n` +
-                `• To: ${dbg.jid}\n` +
-                `• At: ${dbg.at}\n\n` +
-                (dbg.errors.length ? `*Errors (tried shapes):*\n${dbg.errors.map(e => '• ' + e).join('\n')}\n\n` : '*Errors:* none — first shape relayed OK.\n\n') +
-                `*Buttons payload:*\n\`\`\`${buttonsJson.slice(0, 1500)}\`\`\``
-            );
-            // Payload is long — send it as a second message so nothing is truncated away.
-            for (let i = 0; i < payloadJson.length; i += 3500) {
-                await EliteProTech.sendMessage(m.chat, { text: `*Sent message payload (${Math.floor(i / 3500) + 1}):*\n\`\`\`${payloadJson.slice(i, i + 3500)}\`\`\`` }, { quoted: m });
-            }
-            return true;
-        }
-        await reply(`🔍 *DEBUG*\n\nAvailable:\n• *${prefix}debug menubutton* — shows the exact JSON payload and which message shape (native interactive / viewOnce / legacy template) the last button message used.`);
-        return true;
-    }
-
-    /* ---------- MENU BUTTON ---------- */
-    if (command === 'menubutton' || command === 'menubuttonchat') {
-        console.log(`[menubutton] command from ${m.sender || m.chat} in ${m.chat} (${args.length} chars)`);
-        if (!args) {
-            await reply(menuButtonHelp(prefix));
-            return true;
-        }
-
-        const parsed = parseMenuButton(args);
-        if (!parsed.ok) {
-            console.log(`[menubutton] validation failed for ${m.chat}`);
-            await reply(parsed.error);
-            return true;
-        }
-        console.log(`[menubutton] parsed ${parsed.items.length} items for ${m.chat}`);
-
-        try {
-            const { buttons, plain } = buildButtons(parsed.items);
-            const q = quotedInfo(m);
-            let image = null;
-            if (q && unwrap(q.message).imageMessage) {
-                image = await downloadQuoted(EliteProTech, q).catch(err => {
-                    console.error('[menubutton] image download failed:', err?.message || err);
-                    return null;
-                });
-            } else if (unwrap(m.message || {}).imageMessage) {
-                image = await downloadQuoted(EliteProTech, { message: m.message, key: m.key }).catch(() => null);
-            }
-            const how = await sendButtonPost(EliteProTech, m, parsed.title || '🔘 Menu', buttons, image, plain);
-            console.log(`[menubutton] delivered via ${how}`);
-        } catch (err) {
-            console.error('[menubutton] send error:', err?.message || err);
-            await reply(`❌ Failed to send the button message.\n${err?.message || err}`);
         }
         return true;
     }
@@ -1315,13 +766,11 @@ function patchHandler(source) {
     };
 
     // SETTINGS
-    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Addstatus\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n', 'group-commands');
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
-    // GENERAL
-    addAfter('│𖥟╾ Menu\n', '│𖥟╾ Menubuttonchat\n', 'general-commands');
 
     if (code.includes('│𖥟╾ Aivoice\n')) {
         code = code.split('│𖥟╾ Aivoice\n').join('│𖥟╾ Aivoice\n│𖥟╾ Aivoice-male\n│𖥟╾ Aivoice-female\n│𖥟╾ Aivoice-hausa\n│𖥟╾ Aivoice-hausa-female\n');
@@ -1329,7 +778,7 @@ function patchHandler(source) {
         console.log('⚠️ Menu ai-commands patch target not found.');
     }
 
-    // Send the menu with group + channel buttons at the bottom.
+    // Route the menu through our own sender (no buttons, plain image + list).
     const menuSend = `await EliteProTech.sendMessage(m.chat, {
   image: elitepropic,
   caption: elitemenuoh
@@ -1345,7 +794,7 @@ function patchHandler(source) {
         if (loose.test(code)) {
             code = code.replace(loose, menuCall);
         } else {
-            console.log('⚠️ Menu button patch target not found.');
+            console.log('⚠️ Menu send patch target not found.');
         }
     }
 
@@ -1371,7 +820,6 @@ function patchHandler(source) {
 
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
-        if (await handleButtonPress(EliteProTech, m)) return;
         if (await handleAiVoice(EliteProTech, m)) return;
         if (await handleExtraCommands(EliteProTech, m)) return;
 
