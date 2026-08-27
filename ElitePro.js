@@ -24,6 +24,45 @@ const HAUSA_VOICE_IDS = {
 
 let cachedHandler;
 
+/* ============================ BOT MODE (public / private) ============================ */
+// private = only the bot owner may use the bot anywhere (DM and groups)
+// public  = everyone may use the bot
+const MODE_FILE = path.join(__dirname, 'database', 'mode.json');
+
+function loadBotMode() {
+    try {
+        const data = JSON.parse(fs.readFileSync(MODE_FILE, 'utf8'));
+        return data?.mode === 'public' ? 'public' : 'private';
+    } catch {
+        return 'private';
+    }
+}
+
+global.botMode = loadBotMode();
+global.setBotMode = (mode) => {
+    global.botMode = mode === 'public' ? 'public' : 'private';
+    try { fs.writeFileSync(MODE_FILE, JSON.stringify({ mode: global.botMode }, null, 2)); } catch {}
+    return global.botMode;
+};
+global.botIsPublic = () => global.botMode === 'public';
+
+// The owner is the configured owner number, any number in database/owner.json,
+// or the bot's own account (messages sent from the linked phone).
+function isOwnerMessage(m) {
+    if (m?.key?.fromMe) return true;
+    const sender = String(m?.sender || m?.key?.participant || m?.key?.remoteJid || '');
+    const number = (sender.match(/\d+/) || [''])[0];
+    if (!number) return false;
+    let owners = [String(global.ownernumber || OWNER_NUMBER)];
+    try {
+        const extra = JSON.parse(fs.readFileSync(path.join(__dirname, 'database', 'owner.json'), 'utf8'));
+        if (Array.isArray(extra)) owners = owners.concat(extra.map(String));
+    } catch {}
+    return owners.some(o => number === o.replace(/\D/g, ''));
+}
+global.isOwnerMessage = isOwnerMessage;
+
+
 /* ============================ AI VOICE ============================ */
 
 // Common Hausa words used to auto-detect Hausa text.
@@ -393,7 +432,55 @@ async function handleExtraCommands(EliteProTech, m) {
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
+    /* ---------- HELP (what every added command does) ---------- */
+    if (command === 'help') {
+        const HELP = {
+            help: 'Shows this list, or explains one command: .help <command>',
+            menu: 'Sends the full command list with the bot image.',
+            mode: 'Switches the bot between public (everyone can use it) and private (owner only). Usage: .mode public / .mode private',
+            username: 'Sets the name the bot calls you by. Usage: .username <name>',
+            chatbot: 'Turns the AI chatbot on/off. Usage: .chatbot on|off, .chatbot dm on, .chatbot group on, .chatbot here on, .chatbot all off',
+            'chatbot-love': 'DM-only romantic AI personality. Usage: .chatbot-love on|off',
+            'chatbot-friend': 'DM-only best-friend AI personality. Usage: .chatbot-friend on|off',
+            'chatbot gender': 'Sets the gender the AI chats as. Usage: .chatbot gender male|female',
+            chatbotname: 'Sets the name the AI answers to.',
+            aivoice: 'Reads your text out loud as a voice note. Usage: .aivoice <text>',
+            'aivoice-male': 'Voice note in a male voice. Usage: .aivoice-male <text>',
+            'aivoice-female': 'Voice note in a female voice. Usage: .aivoice-female <text>',
+            'aivoice-hausa': 'Voice note in Hausa (male). Usage: .aivoice-hausa <text>',
+            'aivoice-hausa-female': 'Voice note in Hausa (female). Usage: .aivoice-hausa-female <text>',
+            antidelete: 'Restores deleted messages in your DMs.',
+            antideletemessage: 'Restores deleted private messages to you.',
+            'antideletegroup-public': 'Deleted group messages are restored inside the group. Usage: .antideletegroup-public enable|disable',
+            'antideletegroup-private': 'Deleted group messages are sent to the owner DM instead. Usage: .antideletegroup-private enable|disable',
+            grouppp: 'Sets the group picture, cropped square. Reply to an image with .grouppp',
+            groupfullpp: 'Sets the group picture full, nothing cropped. Reply to an image with .groupfullpp',
+            groupstatus: 'Group status command.',
+            promote: 'Makes a tagged, replied-to or typed number a group admin.',
+            vvdm: 'Recovers a view-once media and sends it to your DM. Reply to the view-once with .vvdm',
+            vocalremover: 'Splits a song into vocals and instrumental. Reply to an audio/video.',
+            get: 'Fetches the content of a link. Usage: .get <url>'
+        };
+
+        const wanted = args.toLowerCase().replace(/^\./, '').trim();
+        if (wanted) {
+            const found = HELP[wanted];
+            await reply(found
+                ? `❓ *${prefix}${wanted}*\n\n${found}`
+                : `❓ No help entry for *${wanted}*.\n\nSend *${prefix}help* to see the list.`);
+            return true;
+        }
+
+        const lines = Object.keys(HELP).map(k => `*${prefix}${k}*\n  ${HELP[k]}`).join('\n\n');
+        await reply(
+            `❓ *HELP — WHAT EACH COMMAND DOES*\n\n${lines}\n\n` +
+            `Use *${prefix}help <command>* for one command, and *${prefix}menu* for the full command list.`
+        );
+        return true;
+    }
+
     /* ---------- PROMOTE (no admin check on our side) ---------- */
+
     if (command === 'promote') {
         if (!isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
@@ -768,7 +855,10 @@ function patchHandler(source) {
     // SETTINGS
     addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    // GENERAL
+    addAfter('│𖥟╾ Owner\n', '│𖥟╾ Help\n', 'general-commands');
+
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
 
@@ -799,12 +889,18 @@ function patchHandler(source) {
     }
 
 
-    // Private mode: only the owner's own WhatsApp account can run commands.
-    if (code.includes('if (!isCreator && !m.key.fromMe) return')) {
-        code = code.split('if (!isCreator && !m.key.fromMe) return').join('if (!m.key.fromMe) return');
+    // Bot mode is global and persistent: private = owner only (everywhere),
+    // public = everyone. The remote handler never loaded mode.json, so its
+    // own flag is replaced with ours.
+    code = code.split('if (!EliteProTech.public)').join('if (!global.botIsPublic())');
+    code = code.split('EliteProTech.public ?').join('global.botIsPublic() ?');
+    if (code.includes('EliteProTech.public = input === \'public\';')) {
+        code = code.split('EliteProTech.public = input === \'public\';')
+            .join('EliteProTech.public = input === \'public\'; global.setBotMode(input);');
     } else {
-        console.log('⚠️ Private-mode patch target not found.');
+        console.log('⚠️ Mode-command patch target not found.');
     }
+
 
     // Branding
     code = code
@@ -820,8 +916,12 @@ function patchHandler(source) {
 
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
+        // Private mode is global: nobody but the owner gets a response.
+        if (!global.botIsPublic() && !isOwnerMessage(m)) return;
+
         if (await handleAiVoice(EliteProTech, m)) return;
         if (await handleExtraCommands(EliteProTech, m)) return;
+
 
         if (!cachedHandler) {
             const { data } = await axios.get(HANDLER_URL, { responseType: 'text' });
