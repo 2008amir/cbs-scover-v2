@@ -682,22 +682,11 @@ global.enforceAntiDeleteGroup = async function enforceAntiDeleteGroup(EliteProTe
 global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
     const img = typeof image === 'string' ? { url: image } : image;
 
-    // Plain menu: image + command list. No group/channel buttons or links,
-    // and "powered by codebreakers" is always the very last line.
-    const cleaned = String(caption || '')
-        .split('\n')
-        .filter(line => !/chat\.whatsapp\.com|whatsapp\.com\/channel|ɢʀᴏᴜᴘ:|ᴄʜᴀɴɴᴇʟ:|ᴘᴏᴡᴇʀᴇᴅ ʙʏ/i.test(line))
-        .join('\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trimEnd();
-
-    const text = `${cleaned}\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄᴏᴅᴇʙʀᴇᴀᴋᴇʀꜱ`;
-
     try {
-        await EliteProTech.sendMessage(m.chat, { image: img, caption: text }, { quoted: m });
+        await EliteProTech.sendMessage(m.chat, { image: img, caption }, { quoted: m });
     } catch (err) {
         console.error('Menu image failed, sending text menu:', err?.message || err);
-        await EliteProTech.sendMessage(m.chat, { text }, { quoted: m }).catch(() => {});
+        await EliteProTech.sendMessage(m.chat, { text: caption }, { quoted: m }).catch(() => {});
     }
 };
 
