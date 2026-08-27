@@ -330,7 +330,7 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
 
     const history = global.userChats[sender].join('\n').slice(-4000);
     const mode = chatbotMode(from);
-    const persona = personaBlock(mode, await learnPersona(mode));
+    const persona = personaBlock(mode, await learnPersona(mode)) + genderBlock(chatbotGender(from), mode);
     const prompt = global.buildChatbotPrompt(history, mek.pushName, sender, from, persona);
 
     // WhatsApp "typing..." (three dots) stays live the whole time the reply is
