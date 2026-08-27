@@ -105,16 +105,26 @@ function rememberFacts(sender, text) {
 }
 
 /* ---- personalities: normal / friend / love ---- */
-function chatbotMode(chatJid) {
-    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
-    return data?.modes?.[chatJid] || 'normal';
+function chatbotStore() {
+    return readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {}) || {};
 }
 
-// Preferred gender the bot should chat as in this chat (set with
-// ".chatbot gender male|female", also on chatbot-love / chatbot-friend).
+function chatbotMode(chatJid) {
+    const data = chatbotStore();
+    const mode = data?.modes?.[chatJid];
+    // love / friend are individual-chat personalities only.
+    if ((mode === 'love' || mode === 'friend') && !String(chatJid).endsWith('@g.us')) return mode;
+    return 'normal';
+}
+
+// Gender the bot should chat as here: the per-chat override wins, otherwise
+// the global gender of the active personality.
 function chatbotGender(chatJid) {
-    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
-    const g = data?.genders?.[chatJid];
+    const data = chatbotStore();
+    const perChat = data?.genders?.[chatJid];
+    if (perChat === 'male' || perChat === 'female') return perChat;
+    const mode = chatbotMode(chatJid);
+    const g = mode === 'love' ? data?.loveGender : mode === 'friend' ? data?.friendGender : data?.gender;
     return g === 'male' || g === 'female' ? g : null;
 }
 global.chatbotGender = chatbotGender;
