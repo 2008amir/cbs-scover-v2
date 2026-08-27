@@ -916,8 +916,12 @@ function patchHandler(source) {
 
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
+        // Private mode is global: nobody but the owner gets a response.
+        if (!global.botIsPublic() && !isOwnerMessage(m)) return;
+
         if (await handleAiVoice(EliteProTech, m)) return;
         if (await handleExtraCommands(EliteProTech, m)) return;
+
 
         if (!cachedHandler) {
             const { data } = await axios.get(HANDLER_URL, { responseType: 'text' });
