@@ -432,7 +432,55 @@ async function handleExtraCommands(EliteProTech, m) {
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
+    /* ---------- HELP (what every added command does) ---------- */
+    if (command === 'help') {
+        const HELP = {
+            help: 'Shows this list, or explains one command: .help <command>',
+            menu: 'Sends the full command list with the bot image.',
+            mode: 'Switches the bot between public (everyone can use it) and private (owner only). Usage: .mode public / .mode private',
+            username: 'Sets the name the bot calls you by. Usage: .username <name>',
+            chatbot: 'Turns the AI chatbot on/off. Usage: .chatbot on|off, .chatbot dm on, .chatbot group on, .chatbot here on, .chatbot all off',
+            'chatbot-love': 'DM-only romantic AI personality. Usage: .chatbot-love on|off',
+            'chatbot-friend': 'DM-only best-friend AI personality. Usage: .chatbot-friend on|off',
+            'chatbot gender': 'Sets the gender the AI chats as. Usage: .chatbot gender male|female',
+            chatbotname: 'Sets the name the AI answers to.',
+            aivoice: 'Reads your text out loud as a voice note. Usage: .aivoice <text>',
+            'aivoice-male': 'Voice note in a male voice. Usage: .aivoice-male <text>',
+            'aivoice-female': 'Voice note in a female voice. Usage: .aivoice-female <text>',
+            'aivoice-hausa': 'Voice note in Hausa (male). Usage: .aivoice-hausa <text>',
+            'aivoice-hausa-female': 'Voice note in Hausa (female). Usage: .aivoice-hausa-female <text>',
+            antidelete: 'Restores deleted messages in your DMs.',
+            antideletemessage: 'Restores deleted private messages to you.',
+            'antideletegroup-public': 'Deleted group messages are restored inside the group. Usage: .antideletegroup-public enable|disable',
+            'antideletegroup-private': 'Deleted group messages are sent to the owner DM instead. Usage: .antideletegroup-private enable|disable',
+            grouppp: 'Sets the group picture, cropped square. Reply to an image with .grouppp',
+            groupfullpp: 'Sets the group picture full, nothing cropped. Reply to an image with .groupfullpp',
+            groupstatus: 'Group status command.',
+            promote: 'Makes a tagged, replied-to or typed number a group admin.',
+            vvdm: 'Recovers a view-once media and sends it to your DM. Reply to the view-once with .vvdm',
+            vocalremover: 'Splits a song into vocals and instrumental. Reply to an audio/video.',
+            get: 'Fetches the content of a link. Usage: .get <url>'
+        };
+
+        const wanted = args.toLowerCase().replace(/^\./, '').trim();
+        if (wanted) {
+            const found = HELP[wanted];
+            await reply(found
+                ? `❓ *${prefix}${wanted}*\n\n${found}`
+                : `❓ No help entry for *${wanted}*.\n\nSend *${prefix}help* to see the list.`);
+            return true;
+        }
+
+        const lines = Object.keys(HELP).map(k => `*${prefix}${k}*\n  ${HELP[k]}`).join('\n\n');
+        await reply(
+            `❓ *HELP — WHAT EACH COMMAND DOES*\n\n${lines}\n\n` +
+            `Use *${prefix}help <command>* for one command, and *${prefix}menu* for the full command list.`
+        );
+        return true;
+    }
+
     /* ---------- PROMOTE (no admin check on our side) ---------- */
+
     if (command === 'promote') {
         if (!isGroupChat) {
             await reply('ℹ️ Use this command inside a group.');
