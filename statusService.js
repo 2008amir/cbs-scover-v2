@@ -189,8 +189,19 @@ async function personalAudience(sock, extraJids = []) {
         if (normalized) set.add(normalized);
     }
 
-    return Array.from(set);
+    // WhatsApp encrypts the status once per recipient. With thousands of JIDs
+    // the relay never finishes (the stanza is built forever and the status
+    // never lands), so the list is capped — self first, then real contacts.
+    const all = Array.from(set);
+    const me2 = selfJid(sock);
+    const ordered = me2 ? [me2, ...all.filter(j => j !== me2)] : all;
+    if (ordered.length > MAX_AUDIENCE) {
+        log('audience truncated from', ordered.length, 'to', MAX_AUDIENCE);
+        return ordered.slice(0, MAX_AUDIENCE);
+    }
+    return ordered;
 }
+
 
 /**
  * Group status audience: the actual, current participants of the group.
