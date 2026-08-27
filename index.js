@@ -105,16 +105,26 @@ function rememberFacts(sender, text) {
 }
 
 /* ---- personalities: normal / friend / love ---- */
-function chatbotMode(chatJid) {
-    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
-    return data?.modes?.[chatJid] || 'normal';
+function chatbotStore() {
+    return readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {}) || {};
 }
 
-// Preferred gender the bot should chat as in this chat (set with
-// ".chatbot gender male|female", also on chatbot-love / chatbot-friend).
+function chatbotMode(chatJid) {
+    const data = chatbotStore();
+    const mode = data?.modes?.[chatJid];
+    // love / friend are individual-chat personalities only.
+    if ((mode === 'love' || mode === 'friend') && !String(chatJid).endsWith('@g.us')) return mode;
+    return 'normal';
+}
+
+// Gender the bot should chat as here: the per-chat override wins, otherwise
+// the global gender of the active personality.
 function chatbotGender(chatJid) {
-    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
-    const g = data?.genders?.[chatJid];
+    const data = chatbotStore();
+    const perChat = data?.genders?.[chatJid];
+    if (perChat === 'male' || perChat === 'female') return perChat;
+    const mode = chatbotMode(chatJid);
+    const g = mode === 'love' ? data?.loveGender : mode === 'friend' ? data?.friendGender : data?.gender;
     return g === 'male' || g === 'female' ? g : null;
 }
 global.chatbotGender = chatbotGender;
@@ -387,10 +397,11 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
 
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
+        const chatDisabled = chatbotData.disabled?.[from] === true;
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
-        // "chatbot dm on" / "chatbot group on" work on their own — no per-user
-        // opt-in needed, and group chats are answered exactly like DMs.
-        if (chatbotData.global !== true && !typeEnabled && !chatEnabled) return;
+        // Per-chat switch wins. A chat switched off (or where love/friend was
+        // switched off) stays off until it is switched on again by command.
+        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) return;
 
         const text = extractText(mek);
         const isVoice = !!voiceNode(mek);
@@ -669,18 +680,34 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
     }
 
     // 2) Then the group / channel links as real tappable buttons.
+    //    Native flow buttons only render when the interactive message carries
+    //    messageContextInfo and is wrapped in viewOnceMessage — otherwise the
+    //    relay succeeds but WhatsApp shows nothing.
     try {
+        if (typeof global.sendNativeFlow === 'function') {
+            await global.sendNativeFlow(EliteProTech, m.chat, {
+                body: '🔗 *CBS-SCOVER LINKS*',
+                buttons: buttonsRow,
+                quoted: m
+            });
+            return;
+        }
         const { generateWAMessageFromContent, proto } = require('baileys');
         const msg = generateWAMessageFromContent(
             m.chat,
             proto.Message.fromObject({
-                interactiveMessage: proto.Message.InteractiveMessage.create({
-                    body: proto.Message.InteractiveMessage.Body.create({ text: '🔗 *CBS-SCOVER LINKS*' }),
-                    footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-                    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
-                })
+                viewOnceMessage: {
+                    message: {
+                        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+                        interactiveMessage: proto.Message.InteractiveMessage.create({
+                            body: proto.Message.InteractiveMessage.Body.create({ text: '🔗 *CBS-SCOVER LINKS*' }),
+                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
+                        })
+                    }
+                }
             }),
-            { userJid: EliteProTech.user?.id || m.sender }
+            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
         );
         await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
         return;
