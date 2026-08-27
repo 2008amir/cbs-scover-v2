@@ -432,7 +432,7 @@ async function relayStatus(sock, waMessage, audience, mentionJids = []) {
     }
 
     try {
-        await sock.relayMessage(STORIES_JID, waMessage.message, {
+        const relay = sock.relayMessage(STORIES_JID, waMessage.message, {
             messageId: waMessage.key.id,
             statusJidList: audience,
             // Without the broadcast flag the server accepts the stanza but the
@@ -440,9 +440,17 @@ async function relayStatus(sock, waMessage, audience, mentionJids = []) {
             broadcast: true,
             ...(additionalNodes.length ? { additionalNodes } : {})
         });
+        // A relay that never settles used to leave the command silent forever.
+        await Promise.race([
+            relay,
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`WhatsApp did not confirm the status within ${RELAY_TIMEOUT_MS / 1000}s (audience: ${audience.length}).`)), RELAY_TIMEOUT_MS)
+            )
+        ]);
     } catch (err) {
         throw new StatusError('relay', err);
     }
+
 
     // Mirror the status into the account's own status list so it shows up on
     // the phone right away instead of only existing on the server.
