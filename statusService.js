@@ -420,11 +420,21 @@ async function relayStatus(sock, waMessage, audience, mentionJids = []) {
         await sock.relayMessage(STORIES_JID, waMessage.message, {
             messageId: waMessage.key.id,
             statusJidList: audience,
+            // Without the broadcast flag the server accepts the stanza but the
+            // status never lands in the Updates tab.
+            broadcast: true,
             ...(additionalNodes.length ? { additionalNodes } : {})
         });
     } catch (err) {
         throw new StatusError('relay', err);
     }
+
+    // Mirror the status into the account's own status list so it shows up on
+    // the phone right away instead of only existing on the server.
+    try {
+        await sock.upsertMessage?.(waMessage, 'append');
+    } catch { /* non fatal */ }
+
     return waMessage.key;
 }
 
