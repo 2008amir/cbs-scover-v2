@@ -110,6 +110,26 @@ function chatbotMode(chatJid) {
     return data?.modes?.[chatJid] || 'normal';
 }
 
+// Preferred gender the bot should chat as in this chat (set with
+// ".chatbot gender male|female", also on chatbot-love / chatbot-friend).
+function chatbotGender(chatJid) {
+    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
+    const g = data?.genders?.[chatJid];
+    return g === 'male' || g === 'female' ? g : null;
+}
+global.chatbotGender = chatbotGender;
+
+function genderBlock(gender, mode) {
+    if (!gender) return '';
+    const she = gender === 'female';
+    return `
+GENDER
+- You are ${she ? 'a woman' : 'a man'}. Speak, react and refer to yourself as ${she ? 'her/she' : 'him/he'}.
+- Keep the tone naturally ${she ? 'feminine' : 'masculine'}${mode === 'love' ? ` — ${she ? 'a loving girlfriend' : 'a loving boyfriend'}` : mode === 'friend' ? ` — ${she ? 'a close girl friend' : 'a close guy friend'}` : ''}.
+- Never say you have no gender; if asked, you are ${she ? 'a girl' : 'a guy'}.`;
+}
+
+
 // The love personality keeps learning from real human love talk published
 // online; the material is fetched once and cached for the session.
 global.personaLearning = global.personaLearning || {};
