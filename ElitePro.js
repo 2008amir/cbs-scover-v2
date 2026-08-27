@@ -24,6 +24,45 @@ const HAUSA_VOICE_IDS = {
 
 let cachedHandler;
 
+/* ============================ BOT MODE (public / private) ============================ */
+// private = only the bot owner may use the bot anywhere (DM and groups)
+// public  = everyone may use the bot
+const MODE_FILE = path.join(__dirname, 'database', 'mode.json');
+
+function loadBotMode() {
+    try {
+        const data = JSON.parse(fs.readFileSync(MODE_FILE, 'utf8'));
+        return data?.mode === 'public' ? 'public' : 'private';
+    } catch {
+        return 'private';
+    }
+}
+
+global.botMode = loadBotMode();
+global.setBotMode = (mode) => {
+    global.botMode = mode === 'public' ? 'public' : 'private';
+    try { fs.writeFileSync(MODE_FILE, JSON.stringify({ mode: global.botMode }, null, 2)); } catch {}
+    return global.botMode;
+};
+global.botIsPublic = () => global.botMode === 'public';
+
+// The owner is the configured owner number, any number in database/owner.json,
+// or the bot's own account (messages sent from the linked phone).
+function isOwnerMessage(m) {
+    if (m?.key?.fromMe) return true;
+    const sender = String(m?.sender || m?.key?.participant || m?.key?.remoteJid || '');
+    const number = (sender.match(/\d+/) || [''])[0];
+    if (!number) return false;
+    let owners = [String(global.ownernumber || OWNER_NUMBER)];
+    try {
+        const extra = JSON.parse(fs.readFileSync(path.join(__dirname, 'database', 'owner.json'), 'utf8'));
+        if (Array.isArray(extra)) owners = owners.concat(extra.map(String));
+    } catch {}
+    return owners.some(o => number === o.replace(/\D/g, ''));
+}
+global.isOwnerMessage = isOwnerMessage;
+
+
 /* ============================ AI VOICE ============================ */
 
 // Common Hausa words used to auto-detect Hausa text.
