@@ -812,6 +812,34 @@ async function handleExtraCommands(EliteProTech, m) {
         const on = state === 'on' || state === 'enable';
         const off = state === 'off' || state === 'disable';
 
+        /* gender: ".chatbot gender male", ".chatbot-love gender female", etc. */
+        if (scope === 'gender') {
+            store.genders = store.genders || {};
+            const want = parts[1];
+            if (want === 'male' || want === 'female') {
+                store.genders[m.chat] = want;
+                if (persona) store.modes[m.chat] = persona;
+                writeJson(CHATBOT_FILE, store);
+                await reply(
+                    `${want === 'female' ? '👩' : '👨'} Chatbot gender set to *${want}*.\n` +
+                    `The bot now chats as a ${want === 'female' ? 'girl' : 'guy'} in this chat.`
+                );
+                return true;
+            }
+            if (want === 'off' || want === 'reset' || want === 'none') {
+                delete store.genders[m.chat];
+                writeJson(CHATBOT_FILE, store);
+                await reply('✅ Chatbot gender cleared.');
+                return true;
+            }
+            await reply(
+                `⚧ *CHATBOT GENDER*\n\nCurrent: *${store.genders[m.chat] || 'not set'}*\n\n` +
+                `*${prefix}${command} gender male*\n*${prefix}${command} gender female*\n*${prefix}${command} gender off*`
+            );
+            return true;
+        }
+
+
         if (persona) {
             if (off) {
                 delete store.modes[m.chat];
