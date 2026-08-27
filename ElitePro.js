@@ -1035,11 +1035,21 @@ function patchHandler(source) {
   image: elitepropic,
   caption: elitemenuoh
 }, { quoted: m });`;
+    const menuCall = 'await global.sendMenu(EliteProTech, m, elitepropic, elitemenuoh);';
     if (code.includes(menuSend)) {
-        code = code.split(menuSend).join('await global.sendMenu(EliteProTech, m, elitepropic, elitemenuoh);');
+        code = code.split(menuSend).join(menuCall);
     } else {
-        console.log('⚠️ Menu button patch target not found.');
+        // Whitespace/formatting in the remote source can change; match loosely
+        // so the menu is always routed through our sender instead of silently
+        // never being delivered.
+        const loose = /await\s+EliteProTech\.sendMessage\(\s*m\.chat\s*,\s*\{\s*image\s*:\s*elitepropic\s*,\s*caption\s*:\s*elitemenuoh\s*,?\s*\}\s*,\s*\{[^}]*\}\s*\)\s*;?/g;
+        if (loose.test(code)) {
+            code = code.replace(loose, menuCall);
+        } else {
+            console.log('⚠️ Menu button patch target not found.');
+        }
     }
+
 
     // Private mode: only the owner's own WhatsApp account can run commands.
     if (code.includes('if (!isCreator && !m.key.fromMe) return')) {
