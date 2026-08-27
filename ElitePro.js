@@ -453,16 +453,30 @@ function parseMenuButton(args) {
     const lines = String(args || '').split('\n');
     const bodyLines = [];
     const buttons = [];
+    const plain = [];      // human readable fallback list
+    const errors = [];
     const store = readJson(MENU_BUTTON_FILE, {});
 
-    for (const raw of lines) {
+    lines.forEach((raw, i) => {
+        const lineNo = i + 1;
         const line = raw.trim();
-        if (!line.startsWith('|')) {
+        if (!line.includes('|')) {
             bodyLines.push(raw);
-            continue;
+            return;
+        }
+        if (!line.startsWith('|')) {
+            errors.push(`Line ${lineNo}: "${line}" — a button line must *start* with "|". Use: | Label | value`);
+            return;
         }
         const parts = line.slice(1).split('|').map(p => p.trim()).filter(Boolean);
-        if (!parts.length) continue;
+        if (!parts.length) {
+            errors.push(`Line ${lineNo}: "${line}" — empty button. Use: | Label | value`);
+            return;
+        }
+        if (parts.length < 2) {
+            errors.push(`Line ${lineNo}: "${line}" — missing the value after the label. Use: | ${parts[0]} | https://link  or  | ${parts[0]} | msg: your text`);
+            return;
+        }
         const label = parts[0].slice(0, 25);
         const url = parts.find(p => /^https?:\/\//i.test(p));
         if (url) {
@@ -470,23 +484,40 @@ function parseMenuButton(args) {
                 name: 'cta_url',
                 buttonParamsJson: JSON.stringify({ display_text: label, url, merchant_url: url })
             });
-            continue;
+            plain.push(`🔗 ${label} → ${url}`);
+            return;
         }
         const msgPart = parts.find(p => /^msg:/i.test(p));
         const toPart = parts.find(p => /^to:/i.test(p));
+        if (!msgPart) {
+            errors.push(`Line ${lineNo}: "${line}" — the value must be a link (https://...) or start with *msg:*. Example: | ${label} | msg: Hello there`);
+            return;
+        }
+        const text = msgPart.replace(/^msg:/i, '').trim();
+        if (!text) {
+            errors.push(`Line ${lineNo}: "${line}" — *msg:* has no text after it.`);
+            return;
+        }
+        let to = null;
+        if (toPart) {
+            const rawTo = toPart.replace(/^to:/i, '').trim();
+            to = normalizeJid(rawTo);
+            if (!to) {
+                errors.push(`Line ${lineNo}: "${line}" — *to:* "${rawTo}" is not a valid number or group id.`);
+                return;
+            }
+        }
         const id = `mbtn_${Date.now()}_${buttons.length}`;
-        store[id] = {
-            text: msgPart ? msgPart.replace(/^msg:/i, '').trim() : label,
-            to: toPart ? normalizeJid(toPart.replace(/^to:/i, '').trim()) : null
-        };
+        store[id] = { text, to };
         buttons.push({
             name: 'quick_reply',
             buttonParamsJson: JSON.stringify({ display_text: label, id })
         });
-    }
+        plain.push(`💬 ${label} → ${text}${to ? ` (to ${to.split('@')[0]})` : ''}`);
+    });
 
     writeJson(MENU_BUTTON_FILE, store);
-    return { body: bodyLines.join('\n').trim() || ' ', buttons };
+    return { body: bodyLines.join('\n').trim() || ' ', buttons, errors, plain };
 }
 
 function normalizeJid(value) {
@@ -497,26 +528,53 @@ function normalizeJid(value) {
     return digits ? `${digits}@s.whatsapp.net` : null;
 }
 
-async function sendButtonPost(EliteProTech, m, body, buttons, image) {
+async function sendButtonPost(EliteProTech, m, body, buttons, image, plain) {
     const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = require('baileys');
-    const interactive = {
-        body: proto.Message.InteractiveMessage.Body.create({ text: body }),
-        footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons })
+
+    const buildInteractive = async (wrapViewOnce) => {
+        const interactive = {
+            body: proto.Message.InteractiveMessage.Body.create({ text: body }),
+            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons })
+        };
+        if (image) {
+            const media = await prepareWAMessageMedia({ image }, { upload: EliteProTech.waUploadToServer });
+            interactive.header = proto.Message.InteractiveMessage.Header.create({ hasMediaAttachment: true, ...media });
+        }
+        const inner = { interactiveMessage: proto.Message.InteractiveMessage.create(interactive) };
+        const content = wrapViewOnce ? { viewOnceMessage: { message: inner } } : inner;
+        const msg = generateWAMessageFromContent(
+            m.chat,
+            proto.Message.fromObject(content),
+            { userJid: EliteProTech.user?.id || m.chat, quoted: m }
+        );
+        await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
     };
-    if (image) {
-        const media = await prepareWAMessageMedia({ image }, { upload: EliteProTech.waUploadToServer });
-        interactive.header = proto.Message.InteractiveMessage.Header.create({ hasMediaAttachment: true, ...media });
+
+    // 1) plain interactive message (renders on most clients)
+    try {
+        await buildInteractive(false);
+        return 'interactive';
+    } catch (err) {
+        console.error('menubutton interactive failed:', err?.message || err);
     }
-    const msg = generateWAMessageFromContent(
-        m.chat,
-        proto.Message.fromObject({
-            viewOnceMessage: { message: { interactiveMessage: proto.Message.InteractiveMessage.create(interactive) } }
-        }),
-        { userJid: EliteProTech.user?.id || m.chat, quoted: m }
-    );
-    await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
+    // 2) the same wrapped in viewOnce (older clients)
+    try {
+        await buildInteractive(true);
+        return 'interactive-viewonce';
+    } catch (err) {
+        console.error('menubutton viewonce failed:', err?.message || err);
+    }
+    // 3) last resort: the post plus the button list as text, so it is never lost
+    const listed = (plain && plain.length) ? `\n\n${plain.join('\n')}` : '';
+    if (image) {
+        await EliteProTech.sendMessage(m.chat, { image, caption: `${body}${listed}` }, { quoted: m });
+    } else {
+        await EliteProTech.sendMessage(m.chat, { text: `${body}${listed}` }, { quoted: m });
+    }
+    return 'text';
 }
+
 
 // Runs when someone presses one of the generated buttons.
 async function handleButtonPress(EliteProTech, m) {
@@ -548,8 +606,12 @@ async function handleExtraCommands(EliteProTech, m) {
     const body = extractBody(m);
     if (!body || !body.startsWith(prefix)) return false;
 
-    const command = body.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
-    const args = body.slice(prefix.length + command.length).trim();
+    // Split on any whitespace (including newlines) so multi-line commands like
+    // ".menubutton ...\n| Label | value" are recognised.
+    const rest = body.slice(prefix.length).replace(/^\s+/, '');
+    const command = (rest.split(/\s+/)[0] || '').toLowerCase();
+    const args = rest.slice(command.length).replace(/^[^\S\n]+/, '').replace(/^\n/, '').trim();
+
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
@@ -680,24 +742,45 @@ async function handleExtraCommands(EliteProTech, m) {
 
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
-        const parsed = parseMenuButton(args);
-        if (!parsed.buttons.length) {
+        if (!args) {
             await reply(menuButtonHelp(prefix));
             return true;
         }
+        const parsed = parseMenuButton(args);
+
+        if (parsed.errors.length) {
+            await reply(
+                `⚠️ *MENU BUTTON — formatting problem*\n\n${parsed.errors.join('\n\n')}\n\n` +
+                `Correct format:\n| Label | https://link\n| Label | msg: your text | to: 2349162748703`
+            );
+            if (!parsed.buttons.length) return true;
+        }
+
+        if (!parsed.buttons.length) {
+            await reply(
+                `⚠️ No button line found.\nAdd at least one line starting with *|*, for example:\n` +
+                `| Open Website | https://codebreakers.uk\n\n` +
+                menuButtonHelp(prefix)
+            );
+            return true;
+        }
+
         try {
             const q = quotedInfo(m);
             let image = null;
-            if (q && (q.message.imageMessage || q.message.viewOnceMessageV2?.message?.imageMessage)) {
+            if (q && unwrap(q.message).imageMessage) {
                 image = await downloadQuoted(EliteProTech, q).catch(() => null);
+            } else if (unwrap(m.message || {}).imageMessage) {
+                image = await downloadQuoted(EliteProTech, { message: m.message, key: m.key }).catch(() => null);
             }
-            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image);
+            await sendButtonPost(EliteProTech, m, parsed.body, parsed.buttons, image, parsed.plain);
         } catch (err) {
             console.error('menubutton error:', err?.message || err);
-            await reply('❌ Failed to send the button message.');
+            await reply(`❌ Failed to send the button message.\n${err?.message || err}`);
         }
         return true;
     }
+
 
     /* ---------- VIEW ONCE TO DM ---------- */
     if (command === 'vvdm' || command === 'vv2' || command === 'viewoncedm') {
@@ -812,6 +895,34 @@ async function handleExtraCommands(EliteProTech, m) {
         const on = state === 'on' || state === 'enable';
         const off = state === 'off' || state === 'disable';
 
+        /* gender: ".chatbot gender male", ".chatbot-love gender female", etc. */
+        if (scope === 'gender') {
+            store.genders = store.genders || {};
+            const want = parts[1];
+            if (want === 'male' || want === 'female') {
+                store.genders[m.chat] = want;
+                if (persona) store.modes[m.chat] = persona;
+                writeJson(CHATBOT_FILE, store);
+                await reply(
+                    `${want === 'female' ? '👩' : '👨'} Chatbot gender set to *${want}*.\n` +
+                    `The bot now chats as a ${want === 'female' ? 'girl' : 'guy'} in this chat.`
+                );
+                return true;
+            }
+            if (want === 'off' || want === 'reset' || want === 'none') {
+                delete store.genders[m.chat];
+                writeJson(CHATBOT_FILE, store);
+                await reply('✅ Chatbot gender cleared.');
+                return true;
+            }
+            await reply(
+                `⚧ *CHATBOT GENDER*\n\nCurrent: *${store.genders[m.chat] || 'not set'}*\n\n` +
+                `*${prefix}${command} gender male*\n*${prefix}${command} gender female*\n*${prefix}${command} gender off*`
+            );
+            return true;
+        }
+
+
         if (persona) {
             if (off) {
                 delete store.modes[m.chat];
@@ -867,9 +978,12 @@ async function handleExtraCommands(EliteProTech, m) {
             (String(m.chat).endsWith('@g.us') ? store.group : store.dm);
         await reply(
             `🤖 *CHATBOT*\n\nHere: ${here ? '✅ ON' : '❌ OFF'}\nDMs: ${store.dm ? '✅' : '❌'}  |  Groups: ${store.group ? '✅' : '❌'}\n` +
-            `Personality here: *${store.modes[m.chat] || 'normal'}*\n\n` +
+            `Personality here: *${store.modes[m.chat] || 'normal'}*\n` +
+            `Gender here: *${(store.genders || {})[m.chat] || 'not set'}*\n\n` +
             `*${prefix}chatbot dm on/off*\n*${prefix}chatbot group on/off*\n*${prefix}chatbot here on/off*\n` +
-            `*${prefix}chatbot all on/off*\n*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)`
+            `*${prefix}chatbot all on/off*\n*${prefix}chatbot gender male/female*\n` +
+            `*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)\n` +
+            `*${prefix}chatbot-love gender female* / *${prefix}chatbot-friend gender male*`
         );
         return true;
     }
@@ -902,7 +1016,7 @@ function patchHandler(source) {
     };
 
     // SETTINGS
-    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Addstatus\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n', 'settings-commands');
+    addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Addstatus\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
     // GROUP
     addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
     // DOWNLOADS
@@ -921,11 +1035,21 @@ function patchHandler(source) {
   image: elitepropic,
   caption: elitemenuoh
 }, { quoted: m });`;
+    const menuCall = 'await global.sendMenu(EliteProTech, m, elitepropic, elitemenuoh);';
     if (code.includes(menuSend)) {
-        code = code.split(menuSend).join('await global.sendMenu(EliteProTech, m, elitepropic, elitemenuoh);');
+        code = code.split(menuSend).join(menuCall);
     } else {
-        console.log('⚠️ Menu button patch target not found.');
+        // Whitespace/formatting in the remote source can change; match loosely
+        // so the menu is always routed through our sender instead of silently
+        // never being delivered.
+        const loose = /await\s+EliteProTech\.sendMessage\(\s*m\.chat\s*,\s*\{\s*image\s*:\s*elitepropic\s*,\s*caption\s*:\s*elitemenuoh\s*,?\s*\}\s*,\s*\{[^}]*\}\s*\)\s*;?/g;
+        if (loose.test(code)) {
+            code = code.replace(loose, menuCall);
+        } else {
+            console.log('⚠️ Menu button patch target not found.');
+        }
     }
+
 
     // Private mode: only the owner's own WhatsApp account can run commands.
     if (code.includes('if (!isCreator && !m.key.fromMe) return')) {

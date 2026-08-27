@@ -110,6 +110,26 @@ function chatbotMode(chatJid) {
     return data?.modes?.[chatJid] || 'normal';
 }
 
+// Preferred gender the bot should chat as in this chat (set with
+// ".chatbot gender male|female", also on chatbot-love / chatbot-friend).
+function chatbotGender(chatJid) {
+    const data = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {});
+    const g = data?.genders?.[chatJid];
+    return g === 'male' || g === 'female' ? g : null;
+}
+global.chatbotGender = chatbotGender;
+
+function genderBlock(gender, mode) {
+    if (!gender) return '';
+    const she = gender === 'female';
+    return `
+GENDER
+- You are ${she ? 'a woman' : 'a man'}. Speak, react and refer to yourself as ${she ? 'her/she' : 'him/he'}.
+- Keep the tone naturally ${she ? 'feminine' : 'masculine'}${mode === 'love' ? ` — ${she ? 'a loving girlfriend' : 'a loving boyfriend'}` : mode === 'friend' ? ` — ${she ? 'a close girl friend' : 'a close guy friend'}` : ''}.
+- Never say you have no gender; if asked, you are ${she ? 'a girl' : 'a guy'}.`;
+}
+
+
 // The love personality keeps learning from real human love talk published
 // online; the material is fetched once and cached for the session.
 global.personaLearning = global.personaLearning || {};
@@ -310,7 +330,7 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
 
     const history = global.userChats[sender].join('\n').slice(-4000);
     const mode = chatbotMode(from);
-    const persona = personaBlock(mode, await learnPersona(mode));
+    const persona = personaBlock(mode, await learnPersona(mode)) + genderBlock(chatbotGender(from), mode);
     const prompt = global.buildChatbotPrompt(history, mek.pushName, sender, from, persona);
 
     // WhatsApp "typing..." (three dots) stays live the whole time the reply is
@@ -627,59 +647,54 @@ global.sendMenu = async function sendMenu(EliteProTech, m, image, caption) {
         }
     ];
 
-    // 1) Preferred: one interactive message — menu image, menu text and the
-    //    group/channel as real tappable buttons (no raw links in the text).
+    const img = typeof image === 'string' ? { url: image } : image;
+
+    // 1) The menu itself ALWAYS goes out first as a plain image + caption.
+    //    Interactive messages are silently dropped by some WhatsApp builds,
+    //    which is why the menu sometimes never appeared.
+    let sent = false;
     try {
-        const {
-            generateWAMessageFromContent,
-            prepareWAMessageMedia,
-            proto
-        } = require('baileys');
+        await EliteProTech.sendMessage(m.chat, { image: img, caption }, { quoted: m });
+        sent = true;
+    } catch (err) {
+        console.error('Menu image failed, sending text menu:', err?.message || err);
+    }
+    if (!sent) {
+        try {
+            await EliteProTech.sendMessage(m.chat, { text: caption }, { quoted: m });
+            sent = true;
+        } catch (err) {
+            console.error('Text menu failed too:', err?.message || err);
+        }
+    }
 
-        const media = await prepareWAMessageMedia(
-            { image: typeof image === 'string' ? { url: image } : image },
-            { upload: EliteProTech.waUploadToServer }
-        );
-
+    // 2) Then the group / channel links as real tappable buttons.
+    try {
+        const { generateWAMessageFromContent, proto } = require('baileys');
         const msg = generateWAMessageFromContent(
             m.chat,
             proto.Message.fromObject({
-                viewOnceMessage: {
-                    message: {
-                        interactiveMessage: proto.Message.InteractiveMessage.create({
-                            body: proto.Message.InteractiveMessage.Body.create({ text: caption }),
-                            footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
-                            header: proto.Message.InteractiveMessage.Header.create({
-                                hasMediaAttachment: true,
-                                ...media
-                            }),
-                            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
-                        })
-                    }
-                }
+                interactiveMessage: proto.Message.InteractiveMessage.create({
+                    body: proto.Message.InteractiveMessage.Body.create({ text: '🔗 *CBS-SCOVER LINKS*' }),
+                    footer: proto.Message.InteractiveMessage.Footer.create({ text: '> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʙꜱ-ꜱᴄᴏᴠᴇʀ' }),
+                    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: buttonsRow })
+                })
             }),
-            { userJid: EliteProTech.user?.id || m.sender, quoted: m }
+            { userJid: EliteProTech.user?.id || m.sender }
         );
         await EliteProTech.relayMessage(m.chat, msg.message, { messageId: msg.key.id });
         return;
     } catch (err) {
-        console.error('Interactive menu unavailable, falling back:', err?.message || err);
+        console.error('Interactive link buttons unavailable, falling back:', err?.message || err);
     }
 
-    // 2) Fallback for clients that cannot render buttons.
-    const links = `\n\n👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}`;
-    try {
-        await EliteProTech.sendMessage(
-            m.chat,
-            { image: typeof image === 'string' ? { url: image } : image, caption: `${caption}${links}` },
-            { quoted: m }
-        );
-    } catch (err) {
-        console.error('Menu image failed, sending text menu:', err?.message || err);
-        await EliteProTech.sendMessage(m.chat, { text: `${caption}${links}` }, { quoted: m }).catch(() => {});
-    }
-
+    // 3) Last resort: plain links.
+    await EliteProTech.sendMessage(
+        m.chat,
+        { text: `👥 *Group:* ${GROUP_LINK}\n📢 *Channel:* ${CHANNEL_LINK}` }
+    ).catch(() => {});
 };
+
 
 
 /* ============================ SOURCE PATCHES ============================ */
