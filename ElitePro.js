@@ -957,7 +957,7 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
-    /* ---------- GROUP STATUS (real WhatsApp status) ---------- */
+    /* ---------- STATUS (real WhatsApp status, via StatusService) ---------- */
     if (command === 'groupstatus' || command === 'addstatus' || command === 'mystatus') {
         const groupMode = command === 'groupstatus';
         if (groupMode && !isGroupChat) {
@@ -967,34 +967,35 @@ async function handleExtraCommands(EliteProTech, m) {
         const sub = args.toLowerCase().split(/ +/)[0];
         const rest = ['add', 'post', 'upload'].includes(sub) ? args.slice(sub.length).trim() : args.trim();
 
-        try {
-            const audience = groupMode
-                ? await groupAudience(EliteProTech, m.chat)
-                : [ownerJid(EliteProTech), m.sender || m.chat].filter(Boolean);
+        const statusService = require('./statusService');
+        const guardKey = `${command}:${m.key?.id || ''}`;
+        const result = groupMode
+            ? await statusService.publishGroupStatus(EliteProTech, m, rest, { guardKey })
+            : await statusService.publishPersonalStatus(EliteProTech, m, rest, { guardKey });
 
-            const content = await buildStatusContent(EliteProTech, m, rest);
-            if (!content) {
-                await reply(
-                    `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
-                    `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
-                    `or type *${prefix}${command} add <your text>*.`
-                );
-                return true;
-            }
+        if (result.duplicate) return true;
 
-            await EliteProTech.sendMessage('status@broadcast', content, {
-                backgroundColor: '#0a0a0a',
-                font: 3,
-                statusJidList: audience,
-                broadcast: true
-            });
-            await reply(`✅ Posted to ${groupMode ? 'the group status' : 'your status'} (${audience.length} viewers).`);
-        } catch (err) {
-            console.error('groupstatus error:', err?.message || err);
-            await reply(`❌ Could not post the status.\n${err?.message || err}`);
+        if (result.empty) {
+            await reply(
+                `📸 *${groupMode ? 'GROUP STATUS' : 'STATUS'}*\n\n` +
+                `Reply to a text, image, video or audio with *${prefix}${command}*,\n` +
+                `or type *${prefix}${command} add <your text>*.`
+            );
+            return true;
+        }
+
+        if (result.ok) {
+            await reply(groupMode ? '✅ Group status published successfully.' : '✅ Status published successfully.');
+        } else {
+            await reply(
+                `❌ Status publishing failed.\n\n` +
+                `Stage: ${result.stage}\n` +
+                `Error: ${result.error}`
+            );
         }
         return true;
     }
+
 
 
     /* ---------- DEBUG ---------- */
