@@ -1057,110 +1057,162 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
-    /* ---------- CHATBOT SWITCHES + PERSONALITIES ---------- */
+    /* ---------- CHATBOT: normal / love / friend ---------- */
     if (command === 'chatbot' || command === 'chatbot-friend' || command === 'chatbot-love') {
+        const persona = command === 'chatbot-friend' ? 'friend' : command === 'chatbot-love' ? 'love' : 'normal';
         const store = readJson(CHATBOT_FILE, {});
         store.chats = store.chats || {};
         store.modes = store.modes || {};
-        const parts = args.toLowerCase().split(/ +/).filter(Boolean);
-        const persona = command === 'chatbot-friend' ? 'friend' : command === 'chatbot-love' ? 'love' : null;
-        const scope = parts[0] || '';
-        const state = parts[parts.length - 1];
-        const on = state === 'on' || state === 'enable';
-        const off = state === 'off' || state === 'disable';
+        store.genders = store.genders || {};
+        store.disabled = store.disabled || {};
 
-        /* gender: ".chatbot gender male", ".chatbot-love gender female", etc. */
-        if (scope === 'gender') {
-            store.genders = store.genders || {};
-            const want = parts[1];
+        const parts = args.toLowerCase().split(/\s+/).filter(Boolean);
+        const isGroup = String(m.chat || '').endsWith('@g.us');
+        const save = () => writeJson(CHATBOT_FILE, store);
+
+        const genderKey = persona === 'love' ? 'loveGender' : persona === 'friend' ? 'friendGender' : 'gender';
+        const currentGender = store.genders[m.chat] || store[genderKey] || 'not set';
+        const hereMode = store.modes[m.chat] || 'normal';
+        const hereOn = persona === 'normal'
+            ? (hereMode === 'normal' && (store.chats[m.chat] === true ||
+                (!store.disabled[m.chat] && (store.global === true || (isGroup ? store.group === true : store.dm === true)))))
+            : (hereMode === persona && store.chats[m.chat] === true);
+
+        const status = () => {
+            const head =
+                `🤖 *CHATBOT${persona === 'normal' ? '' : ' — ' + persona.toUpperCase()}*\n\n` +
+                `Here: ${hereOn ? '✅ ON' : '❌ OFF'}\n` +
+                `DMs: ${store.dm ? '✅' : '❌'}  |  Groups: ${store.group ? '✅' : '❌'}\n` +
+                `Personality here: *${hereMode}*\n` +
+                `Gender here: *${currentGender}*\n\n`;
+            if (persona === 'normal') {
+                return head +
+                    `*${prefix}chatbot dm on/off*\n` +
+                    `*${prefix}chatbot group on/off*\n` +
+                    `*${prefix}chatbot here on/off*\n` +
+                    `*${prefix}chatbot all on/off*\n` +
+                    `*${prefix}chatbot gender male/female*\n` +
+                    `*${prefix}chatbot gender here female/male*`;
+            }
+            return head +
+                `*${prefix}${command} on/off*\n` +
+                `*${prefix}${command} gender female/male*\n` +
+                `*${prefix}${command} gender here female/male*\n\n` +
+                `_${persona === 'love' ? 'Love' : 'Friend'} personality works in individual chats only._`;
+        };
+
+        /* ----- gender ----- */
+        if (parts[0] === 'gender') {
+            const here = parts[1] === 'here' || parts[1] === 'this';
+            const want = here ? parts[2] : parts[1];
             if (want === 'male' || want === 'female') {
-                store.genders[m.chat] = want;
-                if (persona) store.modes[m.chat] = persona;
-                writeJson(CHATBOT_FILE, store);
+                if (here) store.genders[m.chat] = want;
+                else store[genderKey] = want;
+                save();
                 await reply(
-                    `${want === 'female' ? '👩' : '👨'} Chatbot gender set to *${want}*.\n` +
-                    `The bot now chats as a ${want === 'female' ? 'girl' : 'guy'} in this chat.`
+                    `${want === 'female' ? '👩' : '👨'} ${persona === 'normal' ? 'Chatbot' : persona === 'love' ? 'Chatbot-love' : 'Chatbot-friend'} gender set to *${want}*` +
+                    `${here ? ' *in this chat only*' : ' for all chats (chats with their own gender keep theirs)'}.`
                 );
                 return true;
             }
             if (want === 'off' || want === 'reset' || want === 'none') {
-                delete store.genders[m.chat];
-                writeJson(CHATBOT_FILE, store);
-                await reply('✅ Chatbot gender cleared.');
+                if (here) delete store.genders[m.chat];
+                else delete store[genderKey];
+                save();
+                await reply(`✅ Gender cleared${here ? ' for this chat' : ''}.`);
                 return true;
             }
-            await reply(
-                `⚧ *CHATBOT GENDER*\n\nCurrent: *${store.genders[m.chat] || 'not set'}*\n\n` +
-                `*${prefix}${command} gender male*\n*${prefix}${command} gender female*\n*${prefix}${command} gender off*`
-            );
+            await reply(status());
             return true;
         }
 
+        const state = parts[parts.length - 1];
+        const on = state === 'on' || state === 'enable';
+        const off = state === 'off' || state === 'disable';
+        const scope = parts[0] || '';
 
-        if (persona) {
-            if (off) {
-                delete store.modes[m.chat];
-                writeJson(CHATBOT_FILE, store);
-                await reply(`✅ Back to the normal chatbot personality here.`);
+        /* ----- love / friend: individual chats only, per-chat switch ----- */
+        if (persona !== 'normal') {
+            if (!on && !off) {
+                await reply(status());
                 return true;
             }
-            store.modes[m.chat] = persona;
-            store.chats[m.chat] = true;
-            writeJson(CHATBOT_FILE, store);
-            await reply(
-                persona === 'love'
-                    ? '💖 *Chatbot-love enabled here.* I now chat with a warm, romantic, affectionate personality — it keeps learning from real human love talk online.'
-                    : '🤝 *Chatbot-friend enabled here.* I now chat like a close, loyal friend — relaxed, supportive and playful.'
-            );
+            if (isGroup) {
+                await reply(`ℹ️ *Chatbot-${persona}* only works in individual chats, not in groups.`);
+                return true;
+            }
+            if (on) {
+                store.modes[m.chat] = persona;
+                store.chats[m.chat] = true;
+                delete store.disabled[m.chat];
+                save();
+                await reply(
+                    persona === 'love'
+                        ? '💖 *Chatbot-love is ON in this chat.* The normal personality is switched off here.'
+                        : '🤝 *Chatbot-friend is ON in this chat.* The normal personality is switched off here.'
+                );
+                return true;
+            }
+            delete store.modes[m.chat];
+            delete store.chats[m.chat];
+            store.disabled[m.chat] = true;   // normal stays off until switched on again
+            save();
+            await reply(`✅ *Chatbot-${persona} is OFF here.* The normal chatbot stays off until you run *${prefix}chatbot here on*.`);
             return true;
         }
 
+        /* ----- normal chatbot switches ----- */
         if ((scope === 'here' || scope === 'this') && (on || off)) {
-            if (on) store.chats[m.chat] = true;
-            else delete store.chats[m.chat];
-            writeJson(CHATBOT_FILE, store);
-            await reply(on ? '🤖 Chatbot is now ON in this chat.' : '🤖 Chatbot is now OFF in this chat.');
+            if (on) {
+                store.chats[m.chat] = true;
+                delete store.modes[m.chat];
+                delete store.disabled[m.chat];
+            } else {
+                delete store.chats[m.chat];
+                store.disabled[m.chat] = true;
+            }
+            save();
+            await reply(on ? '🤖 Chatbot is now ON in this chat (normal personality).' : '🤖 Chatbot is now OFF in this chat.');
             return true;
         }
         if (scope === 'dm' && (on || off)) {
             store.dm = on;
-            writeJson(CHATBOT_FILE, store);
+            save();
             await reply(on ? '🤖 Chatbot is now ON for all DMs.' : '🤖 Chatbot is now OFF for DMs.');
             return true;
         }
         if (scope === 'group' && (on || off)) {
             store.group = on;
-            writeJson(CHATBOT_FILE, store);
+            save();
             await reply(on ? '🤖 Chatbot is now ON in all groups.' : '🤖 Chatbot is now OFF in groups.');
             return true;
         }
-        if (scope === 'all' || scope === 'global') {
+        if ((scope === 'all' || scope === 'global') && (on || off)) {
             store.global = on;
-            writeJson(CHATBOT_FILE, store);
+            store.dm = on;
+            store.group = on;
+            save();
             await reply(on ? '🤖 Chatbot is now ON everywhere.' : '🤖 Chatbot is now OFF everywhere.');
             return true;
         }
         if (on || off) {
-            store.chats[m.chat] = on || undefined;
-            if (!on) delete store.chats[m.chat];
-            writeJson(CHATBOT_FILE, store);
+            if (on) {
+                store.chats[m.chat] = true;
+                delete store.modes[m.chat];
+                delete store.disabled[m.chat];
+            } else {
+                delete store.chats[m.chat];
+                store.disabled[m.chat] = true;
+            }
+            save();
             await reply(on ? '🤖 Chatbot is now ON in this chat.' : '🤖 Chatbot is now OFF in this chat.');
             return true;
         }
 
-        const here = store.global || store.chats[m.chat] === true ||
-            (String(m.chat).endsWith('@g.us') ? store.group : store.dm);
-        await reply(
-            `🤖 *CHATBOT*\n\nHere: ${here ? '✅ ON' : '❌ OFF'}\nDMs: ${store.dm ? '✅' : '❌'}  |  Groups: ${store.group ? '✅' : '❌'}\n` +
-            `Personality here: *${store.modes[m.chat] || 'normal'}*\n` +
-            `Gender here: *${(store.genders || {})[m.chat] || 'not set'}*\n\n` +
-            `*${prefix}chatbot dm on/off*\n*${prefix}chatbot group on/off*\n*${prefix}chatbot here on/off*\n` +
-            `*${prefix}chatbot all on/off*\n*${prefix}chatbot gender male/female*\n` +
-            `*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)\n` +
-            `*${prefix}chatbot-love gender female* / *${prefix}chatbot-friend gender male*`
-        );
+        await reply(status());
         return true;
     }
+
 
     return false;
 }
