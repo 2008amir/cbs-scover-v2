@@ -889,12 +889,18 @@ function patchHandler(source) {
     }
 
 
-    // Private mode: only the owner's own WhatsApp account can run commands.
-    if (code.includes('if (!isCreator && !m.key.fromMe) return')) {
-        code = code.split('if (!isCreator && !m.key.fromMe) return').join('if (!m.key.fromMe) return');
+    // Bot mode is global and persistent: private = owner only (everywhere),
+    // public = everyone. The remote handler never loaded mode.json, so its
+    // own flag is replaced with ours.
+    code = code.split('if (!EliteProTech.public)').join('if (!global.botIsPublic())');
+    code = code.split('EliteProTech.public ?').join('global.botIsPublic() ?');
+    if (code.includes('EliteProTech.public = input === \'public\';')) {
+        code = code.split('EliteProTech.public = input === \'public\';')
+            .join('EliteProTech.public = input === \'public\'; global.setBotMode(input);');
     } else {
-        console.log('⚠️ Private-mode patch target not found.');
+        console.log('⚠️ Mode-command patch target not found.');
     }
+
 
     // Branding
     code = code
