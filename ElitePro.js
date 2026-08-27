@@ -606,8 +606,12 @@ async function handleExtraCommands(EliteProTech, m) {
     const body = extractBody(m);
     if (!body || !body.startsWith(prefix)) return false;
 
-    const command = body.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
-    const args = body.slice(prefix.length + command.length).trim();
+    // Split on any whitespace (including newlines) so multi-line commands like
+    // ".menubutton ...\n| Label | value" are recognised.
+    const rest = body.slice(prefix.length).replace(/^\s+/, '');
+    const command = (rest.split(/\s+/)[0] || '').toLowerCase();
+    const args = rest.slice(command.length).replace(/^[^\S\n]+/, '').replace(/^\n/, '').trim();
+
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
