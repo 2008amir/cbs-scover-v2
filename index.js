@@ -17,16 +17,22 @@ global.channelLink = CHANNEL_LINK;
 // in source get scraped and Google disables them with
 // "Your API key was reported as leaked" (HTTP 403).
 // Set one or more keys in .env:
-//   GEMINI_API_KEY=AIza...
-//   GEMINI_API_KEYS=AIzaKey1,AIzaKey2,AIzaKey3
+//   GEMINI_KEY_1=...  GEMINI_KEY_2=...  (up to any number)
+//   or GEMINI_API_KEY / GEMINI_API_KEYS (comma separated)
 try { require('dotenv').config(); } catch {}
 
-const GEMINI_API_KEYS = String(
-    process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || ''
-)
-    .split(/[,\s]+/)
-    .map(k => k.trim())
-    .filter(Boolean);
+const GEMINI_API_KEYS = (() => {
+    const numbered = Object.keys(process.env)
+        .filter(k => /^GEMINI[-_]?KEY[-_]?\d+$/i.test(k))
+        .sort((a, b) => (parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)))
+        .map(k => process.env[k]);
+    const legacy = String(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(/[,\s]+/);
+    return [...numbered, ...legacy]
+        .map(k => String(k || '').trim())
+        .filter(Boolean)
+        .filter((k, i, arr) => arr.indexOf(k) === i);
+})();
+
 
 // Keys WhatsApp-side rotation should skip for the rest of this process:
 // a key revoked as leaked or invalid will never start working again.
