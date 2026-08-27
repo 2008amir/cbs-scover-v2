@@ -895,9 +895,12 @@ async function handleExtraCommands(EliteProTech, m) {
             (String(m.chat).endsWith('@g.us') ? store.group : store.dm);
         await reply(
             `🤖 *CHATBOT*\n\nHere: ${here ? '✅ ON' : '❌ OFF'}\nDMs: ${store.dm ? '✅' : '❌'}  |  Groups: ${store.group ? '✅' : '❌'}\n` +
-            `Personality here: *${store.modes[m.chat] || 'normal'}*\n\n` +
+            `Personality here: *${store.modes[m.chat] || 'normal'}*\n` +
+            `Gender here: *${(store.genders || {})[m.chat] || 'not set'}*\n\n` +
             `*${prefix}chatbot dm on/off*\n*${prefix}chatbot group on/off*\n*${prefix}chatbot here on/off*\n` +
-            `*${prefix}chatbot all on/off*\n*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)`
+            `*${prefix}chatbot all on/off*\n*${prefix}chatbot gender male/female*\n` +
+            `*${prefix}chatbot-friend* / *${prefix}chatbot-love* (add *off* to reset)\n` +
+            `*${prefix}chatbot-love gender female* / *${prefix}chatbot-friend gender male*`
         );
         return true;
     }
