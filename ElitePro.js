@@ -723,20 +723,28 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
         })
     ];
 
+    const shapeNames = ['native interactive', 'viewOnce'];
+    const dbg = { at: new Date().toISOString(), jid, body, buttons, shape: null, payload: null, errors: [] };
+    global.lastButtonDebug = dbg;
+
     let lastErr = null;
     for (let i = 0; i < shapes.length; i++) {
         try {
+            const content = shapes[i]();
             const msg = generateWAMessageFromContent(
                 jid,
-                proto.Message.fromObject(shapes[i]()),
+                proto.Message.fromObject(content),
                 { userJid: EliteProTech.user?.id || jid, quoted }
             );
             await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
-            console.log(`[buttons] sent using shape ${i + 1}`);
+            dbg.shape = shapeNames[i];
+            dbg.payload = msg.message;
+            console.log(`[buttons] sent using shape ${i + 1} (${shapeNames[i]})`);
             return msg;
         } catch (err) {
             lastErr = err;
-            console.error(`[buttons] shape ${i + 1} failed:`, err?.message || err);
+            dbg.errors.push(`${shapeNames[i]}: ${err?.message || err}`);
+            console.error(`[buttons] shape ${i + 1} (${shapeNames[i]}) failed:`, err?.message || err);
         }
     }
 
@@ -764,9 +772,13 @@ async function sendNativeFlow(EliteProTech, jid, { body, footer, buttons, image,
             { userJid: EliteProTech.user?.id || jid, quoted }
         );
         await EliteProTech.relayMessage(jid, msg.message, { messageId: msg.key.id });
+        dbg.shape = 'legacy template';
+        dbg.payload = msg.message;
         console.log('[buttons] sent using legacy template buttons');
         return msg;
     } catch (err) {
+        dbg.errors.push(`legacy template: ${err?.message || err}`);
+        dbg.shape = 'failed (all shapes)';
         console.error('[buttons] template fallback failed:', err?.message || err);
         throw lastErr || err;
     }
@@ -984,6 +996,41 @@ async function handleExtraCommands(EliteProTech, m) {
         return true;
     }
 
+
+    /* ---------- DEBUG ---------- */
+    if (command === 'debug') {
+        const what = args.toLowerCase().split(/ +/)[0];
+        if (what === 'menubutton' || what === 'buttons') {
+            const dbg = global.lastButtonDebug;
+            if (!dbg) {
+                await reply('🔍 No button message has been sent yet in this session.\nSend a *.menubutton* or *.menu* command first, then run this again.');
+                return true;
+            }
+            const payloadJson = (() => {
+                try { return JSON.stringify(dbg.payload, null, 2); }
+                catch { return String(dbg.payload); }
+            })();
+            const buttonsJson = (() => {
+                try { return JSON.stringify(dbg.buttons, null, 2); }
+                catch { return String(dbg.buttons); }
+            })();
+            await reply(
+                `🔍 *MENUBUTTON DEBUG*\n\n` +
+                `• Shape sent: *${dbg.shape}*\n` +
+                `• To: ${dbg.jid}\n` +
+                `• At: ${dbg.at}\n\n` +
+                (dbg.errors.length ? `*Errors (tried shapes):*\n${dbg.errors.map(e => '• ' + e).join('\n')}\n\n` : '*Errors:* none — first shape relayed OK.\n\n') +
+                `*Buttons payload:*\n\`\`\`${buttonsJson.slice(0, 1500)}\`\`\``
+            );
+            // Payload is long — send it as a second message so nothing is truncated away.
+            for (let i = 0; i < payloadJson.length; i += 3500) {
+                await EliteProTech.sendMessage(m.chat, { text: `*Sent message payload (${Math.floor(i / 3500) + 1}):*\n\`\`\`${payloadJson.slice(i, i + 3500)}\`\`\`` }, { quoted: m });
+            }
+            return true;
+        }
+        await reply(`🔍 *DEBUG*\n\nAvailable:\n• *${prefix}debug menubutton* — shows the exact JSON payload and which message shape (native interactive / viewOnce / legacy template) the last button message used.`);
+        return true;
+    }
 
     /* ---------- MENU BUTTON ---------- */
     if (command === 'menubutton' || command === 'menubuttonchat') {
