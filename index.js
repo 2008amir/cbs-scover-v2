@@ -501,8 +501,7 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const from = mek.key.remoteJid;
         if (!from || from === 'status@broadcast') return;
 
-        const chatbotData = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), null);
-        if (!chatbotData) return;
+        const chatbotData = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {}) || {};
 
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
@@ -510,7 +509,11 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
         // Per-chat switch wins. A chat switched off (or where love/friend was
         // switched off) stays off until it is switched on again by command.
-        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) return;
+        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) {
+            console.log(`[chatbot] off for ${from} (chat:${chatEnabled} disabled:${chatDisabled} dm:${!!chatbotData.dm} group:${!!chatbotData.group} all:${!!chatbotData.global}) — turn it on with ${global.prefix || '.'}chatbot here on`);
+            return;
+        }
+
 
         const text = extractText(mek);
         const isVoice = !!voiceNode(mek);
