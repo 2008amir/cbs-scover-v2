@@ -490,9 +490,6 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         // user messages and must still be answered.
         const isBotMessage = typeof mek.key.id === 'string' && mek.key.id.startsWith('BAE5') && mek.key.id.length === 16;
         if (isBotMessage) return;
-        if (mek.key.fromMe && !global.chatbotAnswerSelf) {
-            // fromMe = typed by the owner on the linked phone -> treat as owner.
-        }
         // In private mode only the owner gets any answer from the bot.
         if (typeof global.botIsPublic === 'function' && !global.botIsPublic()) {
             const senderJid = mek.key.participant || mek.key.remoteJid || '';
