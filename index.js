@@ -44,24 +44,24 @@ const GEMINI_DEAD_KEYS = new Set();
 
 // Remember which key last worked so the next request starts there.
 global.geminiKeyIndex = global.geminiKeyIndex || 0;
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
 
 if (!GEMINI_API_KEYS.length) {
     console.warn('⚠️  No Gemini API key configured. Add GEMINI_KEY_1=... to .env to enable the chatbot.');
 }
 
 
-// Both key formats ("AQ." and "AIza") authenticate the REST endpoint the same
-// way: as an API key, either in the x-goog-api-key header or the ?key= query.
-// A Bearer header is only valid for real OAuth access tokens, and sending an
-// API key that way returns "Expected OAuth 2 access token", so it is tried last.
+// Both key formats ("AQ." and "AIza") authenticate the Google AI Studio REST
+// endpoint the same way: as an API key, either in the x-goog-api-key header or
+// the ?key= query parameter. A Bearer header is never used — Google AI Studio
+// keys fail Bearer/OAuth evaluation with "Expected OAuth 2 access token".
 function geminiAuthVariants(key) {
     return [
         { headers: { 'x-goog-api-key': key }, query: '' },
-        { headers: {}, query: `?key=${encodeURIComponent(key)}` },
-        { headers: { Authorization: `Bearer ${key}` }, query: '' }
+        { headers: {}, query: `?key=${encodeURIComponent(key)}` }
     ];
 }
+
 
 
 
