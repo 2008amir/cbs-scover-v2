@@ -27,10 +27,22 @@ const GEMINI_API_KEYS = (() => {
         .sort((a, b) => (parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)))
         .map(k => process.env[k]);
     const legacy = String(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(/[,\s]+/);
-    return [...numbered, ...legacy]
+    const all = [...numbered, ...legacy]
         .map(k => String(k || '').trim())
         .filter(Boolean)
         .filter((k, i, arr) => arr.indexOf(k) === i);
+
+    // "AQ...." values are AI Studio EPHEMERAL TOKENS: they only work on the
+    // Live API websocket and expire in ~30 minutes, so they can never
+    // authenticate the REST generateContent endpoint used here. Drop them so
+    // rotation is not wasted on credentials that are guaranteed to fail.
+    const usable = all.filter(k => !/^AQ\./i.test(k));
+    const skipped = all.length - usable.length;
+    if (skipped) {
+        console.warn(`⚠️  Ignoring ${skipped} ephemeral Gemini token(s) starting with "AQ." — use an AI Studio API key that starts with "AIza" (https://aistudio.google.com/apikey).`);
+    }
+    // AIza keys first, just in case other shapes are ever added.
+    return usable.sort((a, b) => (/^AIza/i.test(b) ? 1 : 0) - (/^AIza/i.test(a) ? 1 : 0));
 })();
 
 
@@ -43,8 +55,9 @@ global.geminiKeyIndex = global.geminiKeyIndex || 0;
 const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
 if (!GEMINI_API_KEYS.length) {
-    console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
+    console.warn('⚠️  No usable Gemini API key configured. Add GEMINI_KEY_1=AIza... to .env to enable the chatbot.');
 }
+
 
 // Two credential shapes exist: a normal AI Studio API key (starts with "AIza")
 // goes in the ?key= parameter, while an OAuth/ephemeral token (e.g. "AQ....")
