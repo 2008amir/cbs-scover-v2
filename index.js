@@ -27,42 +27,34 @@ const GEMINI_API_KEYS = (() => {
         .sort((a, b) => (parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)))
         .map(k => process.env[k]);
     const legacy = String(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(/[,\s]+/);
-    const all = [...numbered, ...legacy]
+    return [...numbered, ...legacy]
         .map(k => String(k || '').trim())
         .filter(Boolean)
         .filter((k, i, arr) => arr.indexOf(k) === i);
-
-    // Google now issues Gemini API keys with the "AQ." prefix (mid-2026);
-    // older "AIza" keys still work. Both are accepted here.
-    return all;
 })();
 
 
 // Keys WhatsApp-side rotation should skip for the rest of this process:
-// a key revoked or invalid will never start working again.
+// a key revoked as leaked or invalid will never start working again.
 const GEMINI_DEAD_KEYS = new Set();
 
 // Remember which key last worked so the next request starts there.
 global.geminiKeyIndex = global.geminiKeyIndex || 0;
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash'];
+const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
 if (!GEMINI_API_KEYS.length) {
-    console.warn('⚠️  No Gemini API key configured. Add GEMINI_KEY_1=... to .env to enable the chatbot.');
+    console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
 }
 
-
-// Both key formats ("AQ." and "AIza") authenticate the Google AI Studio REST
-// endpoint the same way: as an API key, either in the x-goog-api-key header or
-// the ?key= query parameter. A Bearer header is never used — Google AI Studio
-// keys fail Bearer/OAuth evaluation with "Expected OAuth 2 access token".
+// Two credential shapes exist: a normal AI Studio API key (starts with "AIza")
+// goes in the ?key= parameter, while an OAuth/ephemeral token (e.g. "AQ....")
+// must be sent as a Bearer token. Sending the wrong one back gives
+// "Request had invalid authentication credentials", so both are tried.
 function geminiAuthVariants(key) {
-    return [
-        { headers: { 'x-goog-api-key': key }, query: '' },
-        { headers: {}, query: `?key=${encodeURIComponent(key)}` }
-    ];
+    const bearer = { headers: { Authorization: `Bearer ${key}` }, query: '' };
+    const apiKey = { headers: { 'x-goog-api-key': key }, query: '' };
+    return /^AIza/i.test(key) ? [apiKey, bearer] : [bearer, apiKey];
 }
-
-
 
 
 
@@ -363,7 +355,7 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
     // Every key failed — stop here instead of retrying in a loop.
     console.error('Gemini error (all keys failed):', lastError?.response?.data?.error?.message || lastError?.message);
     if (leaked || GEMINI_DEAD_KEYS.size >= total) {
-        return '⚠️ The chatbot keys were refused by Google. Create a fresh key at https://aistudio.google.com/apikey (new keys start with *AQ.*), put it in .env as GEMINI_KEY_1, then restart the bot.';
+        return '⚠️ The chatbot keys were refused by Google. The keys in .env must be AI Studio API keys (they start with *AIza...*), not OAuth/ephemeral tokens. Create one at https://aistudio.google.com/apikey and put it in .env as GEMINI_KEY_1, then restart the bot.';
     }
 
     return 'I could not generate a reply at this time. Please try again.';
@@ -484,24 +476,18 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
 
 global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
     try {
-        if (!mek?.message || !mek?.key) return;
-        // Messages the bot itself sent (Baileys ids) are ignored, but messages
-        // the owner types from their own phone (same account, fromMe) are real
-        // user messages and must still be answered.
-        const isBotMessage = typeof mek.key.id === 'string' && mek.key.id.startsWith('BAE5') && mek.key.id.length === 16;
-        if (isBotMessage) return;
+        if (!mek?.message || !mek?.key || mek.key.fromMe) return;
         // In private mode only the owner gets any answer from the bot.
         if (typeof global.botIsPublic === 'function' && !global.botIsPublic()) {
             const senderJid = mek.key.participant || mek.key.remoteJid || '';
-            const isOwner = mek.key.fromMe || global.isOwnerMessage?.({ key: mek.key, sender: senderJid });
-            if (!isOwner) return;
+            if (!global.isOwnerMessage?.({ key: mek.key, sender: senderJid })) return;
         }
-
 
         const from = mek.key.remoteJid;
         if (!from || from === 'status@broadcast') return;
 
-        const chatbotData = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {}) || {};
+        const chatbotData = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), null);
+        if (!chatbotData) return;
 
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
@@ -509,11 +495,7 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
         // Per-chat switch wins. A chat switched off (or where love/friend was
         // switched off) stays off until it is switched on again by command.
-        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) {
-            console.log(`[chatbot] off for ${from} (chat:${chatEnabled} disabled:${chatDisabled} dm:${!!chatbotData.dm} group:${!!chatbotData.group} all:${!!chatbotData.global}) — turn it on with ${global.prefix || '.'}chatbot here on`);
-            return;
-        }
-
+        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) return;
 
         const text = extractText(mek);
         const isVoice = !!voiceNode(mek);
