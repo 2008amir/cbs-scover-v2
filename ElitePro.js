@@ -664,6 +664,25 @@ async function handleExtraCommands(EliteProTech, m) {
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
 
+    /* ---------- HELP ---------- */
+    if (command === 'help') {
+        if (args) {
+            const one = helpForCommand(args.replace(/^[./!#]/, '').trim());
+            await reply(one || `❔ No help found for *${args}*. Send *${prefix}help* for the full list.`);
+            return true;
+        }
+        await reply(
+            `📖 *CBS-SCOVER HELP*\n\nWhat every command does, section by section.\n` +
+            `Send *${prefix}help <command>* for one command only.`
+        );
+        for (const [section, items] of HELP_SECTIONS) {
+            await reply(helpSectionText(section, items, prefix));
+            await new Promise(r => setTimeout(r, 600));
+        }
+        return true;
+    }
+
+
     /* ---------- PROMOTE (no admin check on our side) ---------- */
     if (command === 'promote') {
         if (!isGroupChat) {
