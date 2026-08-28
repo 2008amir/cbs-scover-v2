@@ -380,7 +380,278 @@ async function sendViewOnceCopy(EliteProTech, q, target, m) {
 }
 
 
+/* ============================ HELP ============================ */
+// One short line describing what every command does, grouped exactly like the
+// menu. `.help` sends it section by section, `.help <command>` explains one.
+const HELP_SECTIONS = [
+    ['SETTINGS', {
+        Addowner: 'Add a number as a bot owner.',
+        Delowner: 'Remove a number from the owner list.',
+        Listowner: 'Show every registered owner.',
+        Block: 'Block a user from the bot/WhatsApp.',
+        Unblock: 'Unblock a blocked user.',
+        Blocklist: 'Show all blocked users.',
+        Anticall: 'Auto decline or block incoming calls.',
+        Joingc: 'Make the bot join a group from an invite link.',
+        Join: 'Same as joingc — join a group link.',
+        Restart: 'Restart the bot process.',
+        Mode: 'Switch the bot between public and private (applies everywhere).',
+        Edit: 'Edit a message the bot sent.',
+        Clearall: 'Clear all chats from the bot account.',
+        Autobio: 'Keep the bot bio updating automatically.',
+        Setpp: 'Set the bot profile picture (cropped).',
+        Autoread: 'Auto mark incoming messages as read.',
+        Autotyping: 'Show "typing..." before replying.',
+        Autorecording: 'Show "recording audio..." before replying.',
+        Autorecordtype: 'Randomly show typing or recording.',
+        Autoviewstatus: 'Automatically view everyone\'s status.',
+        Autoreact: 'React automatically to incoming messages.',
+        Autolikestatus: 'Automatically like viewed statuses.',
+        Chatbot: 'Turn the AI chatbot on/off (dm, group, here, all).',
+        Getsession: 'Send your session credentials.',
+        Backup: 'Send a backup of the bot files.',
+        Update: 'Pull the latest bot update.',
+        Setmenuimage: 'Change the image shown on the menu.',
+        Antidelete: 'Restore messages deleted in private chats.',
+        Antideletemessage: 'Same as antidelete, message level control.',
+        Chatbotname: 'Change the name the AI chatbot answers with.',
+        Username: 'Set the name the bot calls you by.',
+        'Chatbot-friend': 'Friendly-buddy AI personality (private chats only).',
+        'Chatbot-love': 'Romantic AI personality (private chats only).',
+        'Chatbot gender': 'Set the chatbot voice/personality gender (male/female).',
+        Setprefix: 'Change the command prefix.',
+        Setfullpp: 'Set the bot profile picture without cropping.',
+        Reveal: 'Reveal a hidden/one-time message.',
+        Listgroup: 'List all groups the bot is in.',
+        Listonline: 'Show who is currently online in the chat.',
+        Setpaypoint: 'Set your payment/donation details.',
+        Reportcommand: 'Report a broken command to the owner.'
+    }],
+    ['GROUPS', {
+        Add: 'Add a member to the group.',
+        Addall: 'Add a saved list of members to the group.',
+        Promote: 'Make a member a group admin.',
+        Promoteall: 'Make every member an admin.',
+        Demote: 'Remove admin rights from a member.',
+        Demoteall: 'Remove admin rights from everyone.',
+        Kick: 'Remove a member from the group.',
+        Kickall: 'Remove all members from the group.',
+        Left: 'Make the bot leave the group.',
+        Tagall: 'Mention every member with a message.',
+        Hidetag: 'Mention everyone invisibly.',
+        Totag: 'Re-send a quoted message tagging everyone.',
+        Gc: 'Open or close the group (who can send).',
+        Warn: 'Give a member a warning.',
+        Unwarn: 'Remove a warning from a member.',
+        All: 'Alert every member of the group.',
+        Antistatus: 'Delete status re-posts inside the group.',
+        Approve: 'Approve pending join requests.',
+        Reject: 'Reject pending join requests.',
+        Group: 'Open/close the group chat.',
+        Gcalert: 'Toggle group event alerts.',
+        Addmetaai: 'Add Meta AI to the group.',
+        Removemetaai: 'Remove Meta AI from the group.',
+        Opentime: 'Schedule the group to open at a time.',
+        Closetime: 'Schedule the group to close at a time.',
+        Setdesc: 'Change the group description.',
+        Setgrouppicture: 'Change the group picture.',
+        Editinfo: 'Choose who can edit group info.',
+        Invite: 'Get the group invite link.',
+        Revoke: 'Reset the group invite link.',
+        Savecontact: 'Save all group members as contacts.',
+        Sendcontact: 'Send the group contact list.',
+        Contacttag: 'Tag members using their saved names.',
+        Welcome: 'Turn welcome/goodbye messages on or off.',
+        Antilink: 'Delete links posted in the group.',
+        Tagadmin: 'Mention all group admins.',
+        'Antideletegroup-public': 'Restore deleted group messages inside the group.',
+        'Antideletegroup-private': 'Send deleted group messages to the owner DM.',
+        Grouppp: 'Set the group picture from a replied image (cropped).',
+        Groupfullpp: 'Set the group picture full size, without cropping.',
+        Groupstatus: 'Group status tool.'
+    }],
+    ['AI', {
+        Aivoice: 'Read your text out loud as a voice note.',
+        'Aivoice-male': 'Voice note in a male voice.',
+        'Aivoice-female': 'Voice note in a female voice.',
+        'Aivoice-hausa': 'Voice note in a Hausa male voice.',
+        'Aivoice-hausa-female': 'Voice note in a Hausa female voice.',
+        Ai: 'Ask the AI anything.',
+        Search: 'AI powered web search.',
+        Chatgpt: 'Ask ChatGPT a question.',
+        Analyze: 'Let the AI analyse a replied image or text.',
+        Aimusic: 'Generate music with AI.'
+    }],
+    ['ANIME', {
+        Animeavatar: 'Random anime avatar.',
+        Animeblush: 'Anime blushing reaction.',
+        Animewave: 'Anime waving reaction.',
+        Animesmile: 'Anime smiling reaction.',
+        Animepoke: 'Anime poke reaction.',
+        Animewink: 'Anime wink reaction.',
+        Animebonk: 'Anime bonk reaction.',
+        Animebully: 'Anime bully reaction.',
+        Neko: 'Random neko image.',
+        Waifu: 'Random waifu image.',
+        Loli: 'Random loli image.'
+    }],
+    ['IMG MAKER', {
+        Create: 'Create an image from your text.',
+        Ephoto: 'Text effects from ephoto360.',
+        Brat: 'Make a brat-style text sticker.',
+        Toanime: 'Turn a photo into anime style.',
+        Ephotolist: 'List available ephoto effects.',
+        Imagine: 'AI image generation from a prompt.',
+        Deepfake: 'Face swap on a replied image.',
+        Firelogo: 'Make a fire text logo.',
+        Fakeigstory: 'Create a fake Instagram story image.',
+        Carbon: 'Turn code into a carbon image.'
+    }],
+    ['CONVERT', {
+        Sticker: 'Turn an image/video into a sticker.',
+        Take: 'Re-brand a sticker with your pack name.',
+        Toimage: 'Convert a sticker to an image.',
+        Tovideo: 'Convert an animated sticker to video.',
+        Toaudio: 'Extract audio from a video.',
+        Tovideonote: 'Convert a video into a round video note.',
+        Tomp3: 'Convert media into an mp3 file.',
+        Tovn: 'Convert audio into a voice note.',
+        Togif: 'Convert a sticker/video into a gif.',
+        Toqr: 'Turn text or a link into a QR code.',
+        Addpdf: 'Add a page to the PDF being built.',
+        Img2pdf: 'Turn collected images into a PDF.',
+        Clearpdf: 'Clear the collected PDF pages.',
+        Url: 'Upload media and get a direct link.',
+        Catbox: 'Upload media to catbox and get a link.',
+        Img2txt: 'Read the text inside an image.',
+        Get: 'Fetch the raw content of a URL.',
+        Fliptext: 'Flip your text upside down.',
+        Emojimix: 'Mix two emojis into a sticker.',
+        Tiny: 'Shorten a long link.',
+        Ssweb: 'Screenshot a website.',
+        Imgbb: 'Upload an image to imgbb.',
+        Tts: 'Text to speech.',
+        Ocr: 'Extract text from an image.',
+        Qrscan: 'Read a QR code from an image.',
+        Vocalremover: 'Split a song into vocals and instrumental.',
+        Colorize: 'Colorize an old black & white photo.',
+        Remini: 'Enhance and sharpen a photo.',
+        Translate: 'Translate text to another language.',
+        Removebg: 'Remove the background of an image.',
+        Toviewonce: 'Re-send media as a view-once message.'
+    }],
+    ['FUN', {
+        Readmore: 'Hide long text behind "read more".',
+        Define: 'Dictionary definition of a word.',
+        Flux: 'AI art with the Flux model.',
+        Quotes: 'Random quote.',
+        Fact: 'Random fact.',
+        Truth: 'Random truth question.',
+        Google: 'Google search results.',
+        Pickupline: 'Random pickup line.',
+        Flirt: 'Random flirty line.',
+        Story: 'Random short story.',
+        Stickkill: 'Fun kill sticker on a tagged user.',
+        Note: 'Save a personal note.',
+        Roast: 'Roast a tagged user.',
+        Predict: 'Fun prediction about someone.',
+        Listnote: 'Show your saved notes.',
+        Deletenote: 'Delete a saved note.',
+        Insult: 'Random insult (fun).',
+        Wasted: 'Wasted effect on a photo.',
+        Fakechannel: 'Make a fake channel message.',
+        Fakedana: 'Make a fake payment alert.',
+        Country: 'Info about a country.',
+        Telegramsticker: 'Download a Telegram sticker pack.',
+        Rate: 'Rate a tagged person for fun.'
+    }],
+    ['DOWNLOADS', {
+        Play: 'Search and send a song as audio.',
+        Vocalremover: 'Separate vocals and instrumental from a song.',
+        Get: 'Download the content of a direct link.',
+        Ytmp3: 'Download YouTube audio.',
+        Ytmp4: 'Download YouTube video.',
+        Mediafire: 'Download a Mediafire file.',
+        Wallpaper: 'Search wallpapers.',
+        Hdwallpaper: 'Search HD wallpapers.',
+        Pinterest: 'Search Pinterest images.',
+        Tiktok: 'Download a TikTok video without watermark.',
+        Instagram: 'Download Instagram media.',
+        Facebook: 'Download a Facebook video.',
+        Img: 'Search and send images.',
+        Aio: 'All-in-one downloader for any supported link.',
+        Fdroid: 'Download an app from F-Droid.',
+        Imgsearch: 'Search the web for images.',
+        Song: 'Download a song by name.',
+        Twitter: 'Download a Twitter/X video.',
+        Apk: 'Download an Android app.',
+        Spotify: 'Download a Spotify track.',
+        Spotifysearch: 'Search Spotify tracks.',
+        Gitclone: 'Download a GitHub repository as zip.',
+        Splay: 'Play a song from Spotify.',
+        Nsfw: 'NSFW content (18+).',
+        Npm: 'Look up an npm package.',
+        Knackvideo: 'Download a Knack video.',
+        Tiktokstalk: 'Show a TikTok profile.'
+    }],
+    ['GENERAL', {
+        Owner: 'Show the bot owner contact.',
+        Help: 'Explain what every command does, section by section.',
+        Menu: 'Show the full command list.',
+        Test: 'Check that the bot is responding.',
+        Alive: 'Show the bot status card.',
+        Runtime: 'How long the bot has been running.',
+        Script: 'Link to the bot source.',
+        Donate: 'Support the bot owner.',
+        Clearchat: 'Clear the current chat.',
+        Delete: 'Delete a replied message.',
+        Getpp: 'Get someone\'s profile picture.',
+        Gemini: 'Ask Google Gemini a question.',
+        Elevenlab: 'Realistic AI voice from text.',
+        Lyrics: 'Get the lyrics of a song.',
+        Yts: 'Search YouTube.',
+        Vv: 'Reveal a view-once media in the same chat.',
+        Getgrouppp: 'Get the group profile picture.',
+        Panel: 'Bot hosting panel info.',
+        Copy: 'Copy a replied message.',
+        Vvdm: 'Recover a view-once media and send it to your DM.',
+        '8ballpool': 'Ask the magic 8 ball.',
+        Bible: 'Read a bible verse.',
+        Quran: 'Read a Quran verse.',
+        Shazam: 'Identify a song from audio.',
+        Statusd: 'Download a replied status.',
+        Audiospeed: 'Speed up or slow down audio.',
+        Eval: 'Run code (owner only).',
+        Jid: 'Show the chat JID.',
+        Lid: 'Show the chat LID.',
+        Tempmail: 'Create a temporary email address.',
+        Tempinbox: 'Read the temporary email inbox.',
+        Poll: 'Create a poll.',
+        'Channel-id': 'Show a WhatsApp channel ID.',
+        'Group-id': 'Show the group ID.',
+        Pair: 'Pair a new session with a session id.'
+    }]
+];
+
+function helpForCommand(name) {
+    const key = String(name || '').toLowerCase();
+    for (const [section, items] of HELP_SECTIONS) {
+        for (const [cmd, desc] of Object.entries(items)) {
+            if (cmd.toLowerCase() === key) return `📖 *${cmd}* — ${section}\n\n${desc}`;
+        }
+    }
+    return null;
+}
+
+function helpSectionText(section, items, prefix) {
+    const lines = Object.entries(items)
+        .map(([cmd, desc]) => `│ *${prefix}${cmd.toLowerCase()}*\n│ ↳ ${desc}`)
+        .join('\n│\n');
+    return `┏━━━━━━━━━━━━━━━❍\n┗┳❍ 「 *${section}* 」❍\n┏┻━━━━━━━━━━━━━━❍\n${lines}\n┗━━━━━━━━━━━━━━━❍`;
+}
+
 async function handleExtraCommands(EliteProTech, m) {
+
 
     const prefix = global.prefix || '.';
     const body = extractBody(m);
@@ -392,6 +663,25 @@ async function handleExtraCommands(EliteProTech, m) {
 
     const reply = (text) => EliteProTech.sendMessage(m.chat, { text }, { quoted: m });
     const isGroupChat = String(m.chat || '').endsWith('@g.us');
+
+    /* ---------- HELP ---------- */
+    if (command === 'help') {
+        if (args) {
+            const one = helpForCommand(args.replace(/^[./!#]/, '').trim());
+            await reply(one || `❔ No help found for *${args}*. Send *${prefix}help* for the full list.`);
+            return true;
+        }
+        await reply(
+            `📖 *CBS-SCOVER HELP*\n\nWhat every command does, section by section.\n` +
+            `Send *${prefix}help <command>* for one command only.`
+        );
+        for (const [section, items] of HELP_SECTIONS) {
+            await reply(helpSectionText(section, items, prefix));
+            await new Promise(r => setTimeout(r, 600));
+        }
+        return true;
+    }
+
 
     /* ---------- PROMOTE (no admin check on our side) ---------- */
     if (command === 'promote') {
@@ -768,7 +1058,10 @@ function patchHandler(source) {
     // SETTINGS
     addAfter('│𖥟╾ Antidelete\n', '│𖥟╾ Antideletemessage\n│𖥟╾ Chatbotname\n│𖥟╾ Username\n│𖥟╾ Chatbot-friend\n│𖥟╾ Chatbot-love\n│𖥟╾ Chatbot gender\n', 'settings-commands');
     // GROUP
-    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n', 'group-commands');
+    addAfter('│𖥟╾ Tagadmin\n', '│𖥟╾ Antideletegroup-public\n│𖥟╾ Antideletegroup-private\n│𖥟╾ Grouppp\n│𖥟╾ Groupfullpp\n│𖥟╾ Groupstatus\n', 'group-commands');
+    // GENERAL
+    addAfter('│𖥟╾ Owner\n', '│𖥟╾ Help\n', 'general-commands');
+
     // DOWNLOADS
     addAfter('│𖥟╾ Play\n', '│𖥟╾ Vocalremover\n│𖥟╾ Get\n', 'download-commands');
 
@@ -799,12 +1092,10 @@ function patchHandler(source) {
     }
 
 
-    // Private mode: only the owner's own WhatsApp account can run commands.
-    if (code.includes('if (!isCreator && !m.key.fromMe) return')) {
-        code = code.split('if (!isCreator && !m.key.fromMe) return').join('if (!m.key.fromMe) return');
-    } else {
-        console.log('⚠️ Private-mode patch target not found.');
-    }
+    // Mode is global for the whole bot (stored in database/mode.json), never
+    // per chat: private = only the owner numbers (and the bot itself) can run
+    // commands anywhere, public = everyone can. Keep the upstream gate as-is.
+
 
     // Branding
     code = code
@@ -818,10 +1109,35 @@ function patchHandler(source) {
     return code;
 }
 
+// Global (bot-wide) mode gate for the locally added commands, so private mode
+// applies in every chat and not only where it was switched on.
+function isBotPublic() {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(__dirname, 'database', 'mode.json'), 'utf8')).mode === 'public';
+    } catch {
+        return false;
+    }
+}
+
+function isOwnerSender(m) {
+    if (m?.key?.fromMe) return true;
+    const num = String(m?.sender || '').split('@')[0].split(':')[0];
+    const owners = [String(global.ownernumber || '')];
+    try {
+        const list = JSON.parse(fs.readFileSync(path.join(__dirname, 'database', 'owner.json'), 'utf8'));
+        if (Array.isArray(list)) owners.push(...list.map(String));
+    } catch {}
+    return owners.some(o => o && o.replace(/\D/g, '') === num.replace(/\D/g, ''));
+}
+
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
-        if (await handleAiVoice(EliteProTech, m)) return;
-        if (await handleExtraCommands(EliteProTech, m)) return;
+        const allowed = isBotPublic() || isOwnerSender(m);
+        if (allowed) {
+            if (await handleAiVoice(EliteProTech, m)) return;
+            if (await handleExtraCommands(EliteProTech, m)) return;
+        }
+
 
         if (!cachedHandler) {
             const { data } = await axios.get(HANDLER_URL, { responseType: 'text' });
