@@ -46,17 +46,6 @@ if (!GEMINI_API_KEYS.length) {
     console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
 }
 
-// Two credential shapes exist: a normal AI Studio API key (starts with "AIza")
-// goes in the ?key= parameter, while an OAuth/ephemeral token (e.g. "AQ....")
-// must be sent as a Bearer token. Sending the wrong one back gives
-// "Request had invalid authentication credentials", so both are tried.
-function geminiAuthVariants(key) {
-    const bearer = { headers: { Authorization: `Bearer ${key}` }, query: '' };
-    const apiKey = { headers: { 'x-goog-api-key': key }, query: '' };
-    return /^AIza/i.test(key) ? [apiKey, bearer] : [bearer, apiKey];
-}
-
-
 
 
 const NAME_FILE = path.join(__dirname, 'database', 'chatbotname.json');
@@ -171,47 +160,24 @@ GENDER
 }
 
 
-// The love / friend personalities are seeded with human relationship talk.
-// A short online refresh is attempted once per session; when the host has no
-// DNS/network for it, the built-in material is used silently.
+// The love personality keeps learning from real human love talk published
+// online; the material is fetched once and cached for the session.
 global.personaLearning = global.personaLearning || {};
-
-const PERSONA_SEED = {
-    love: [
-        '- I missed you today, even the small boring parts of it.',
-        '- Tell me how your day really went, not the short version.',
-        '- You do not have to be okay with me, just be honest.',
-        '- I am proud of you, and I say it because I mean it.',
-        '- Come here, let me spoil you a little.',
-        '- Even when we argue, I am still on your side.'
-    ].join('\n'),
-    friend: [
-        '- Bro, what happened? Talk to me.',
-        '- You are overthinking again, come on.',
-        '- That is actually wild, tell me everything.',
-        '- I got you, always. No stress.',
-        '- Okay but be honest, was it your fault? Haha.',
-        '- Go rest, you have been running all day.'
-    ].join('\n')
-};
-
 async function learnPersona(mode) {
     if (mode === 'normal') return '';
     if (global.personaLearning[mode]) return global.personaLearning[mode];
-    global.personaLearning[mode] = PERSONA_SEED[mode] || '';
     const url = mode === 'love'
         ? 'https://api.quotable.io/quotes?tags=love&limit=25'
         : 'https://api.quotable.io/quotes?tags=friendship&limit=25';
     try {
-        const { data } = await axios.get(url, { timeout: 8000 });
+        const { data } = await axios.get(url, { timeout: 15000 });
         const lines = (data?.results || []).map(q => `- ${q.content}`).join('\n');
-        if (lines) global.personaLearning[mode] = `${global.personaLearning[mode]}\n${lines}`.trim();
-    } catch {
-        // Offline is fine — the built-in material above is already loaded.
+        if (lines) global.personaLearning[mode] = lines;
+    } catch (err) {
+        console.log('persona learning offline:', err?.message || err);
     }
     return global.personaLearning[mode] || '';
 }
-
 global.learnPersona = learnPersona;
 
 function personaBlock(mode, learned) {
@@ -310,54 +276,41 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
         const keyIndex = (global.geminiKeyIndex + k) % total;
         const key = GEMINI_API_KEYS[keyIndex];
         if (GEMINI_DEAD_KEYS.has(key)) continue;
-        let keyDead = false;
         for (const model of GEMINI_MODELS) {
-            if (keyDead) break;
-            let authFailures = 0;
-            const variants = geminiAuthVariants(key);
-            for (const variant of variants) {
-                try {
-                    const { data } = await axios.post(
-                        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent${variant.query}`,
-                        body,
-                        {
-                            headers: { 'Content-Type': 'application/json', ...variant.headers },
-                            timeout: 120000
-                        }
-                    );
-                    const out = (data?.candidates?.[0]?.content?.parts || [])
-                        .map(p => p?.text || '').join('').trim();
-                    if (out) {
-                        global.geminiKeyIndex = keyIndex; // remember the working key
-                        return out;
-                    }
-                    lastError = new Error('empty gemini response');
-                } catch (err) {
-                    // Silent fallback: next auth style, then next model, then next key.
-                    lastError = err;
-                    const status = err?.response?.status;
-                    const message = String(err?.response?.data?.error?.message || '');
-                    if (status === 401 || status === 403 || status === 400) authFailures++;
-                    // A revoked / leaked key never recovers — retire it for this
-                    // process, but only once BOTH auth styles were refused.
-                    if (authFailures >= variants.length && (status === 400 || status === 401 || status === 403)) {
-                        GEMINI_DEAD_KEYS.add(key);
-                        keyDead = true;
-                        if (/leaked|revoked|invalid|expired|not valid|credential/i.test(message)) leaked = true;
-                        console.warn(`Gemini: key #${keyIndex + 1} refused by Google (${status}). Skipping it from now on.`);
-                        break;
-                    }
+            try {
+                const { data } = await axios.post(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+                    body,
+                    { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
+                );
+                const out = (data?.candidates?.[0]?.content?.parts || [])
+                    .map(p => p?.text || '').join('').trim();
+                if (out) {
+                    global.geminiKeyIndex = keyIndex; // remember the working key
+                    return out;
+                }
+                lastError = new Error('empty gemini response');
+            } catch (err) {
+                // Silent fallback: move on to the next model, then the next key.
+                lastError = err;
+                const status = err?.response?.status;
+                const message = String(err?.response?.data?.error?.message || '');
+                // A revoked / leaked / invalid key never recovers — retire it
+                // for this process so it is not tried again on every message.
+                if (status === 400 || status === 403) {
+                    GEMINI_DEAD_KEYS.add(key);
+                    if (/leaked|revoked|invalid|expired|not valid/i.test(message)) leaked = true;
+                    console.warn(`Gemini: key #${keyIndex + 1} disabled by Google (${status}). Skipping it from now on.`);
+                    break; // no point trying other models with a dead key
                 }
             }
         }
     }
-
     // Every key failed — stop here instead of retrying in a loop.
     console.error('Gemini error (all keys failed):', lastError?.response?.data?.error?.message || lastError?.message);
     if (leaked || GEMINI_DEAD_KEYS.size >= total) {
-        return '⚠️ The chatbot keys were refused by Google. The keys in .env must be AI Studio API keys (they start with *AIza...*), not OAuth/ephemeral tokens. Create one at https://aistudio.google.com/apikey and put it in .env as GEMINI_KEY_1, then restart the bot.';
+        return '⚠️ The Gemini API key is no longer valid (Google revoked it as leaked). Create a new key at https://aistudio.google.com/apikey, put it in .env as GEMINI_API_KEY and restart the bot.';
     }
-
     return 'I could not generate a reply at this time. Please try again.';
 };
 
@@ -477,12 +430,6 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
 global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
     try {
         if (!mek?.message || !mek?.key || mek.key.fromMe) return;
-        // In private mode only the owner gets any answer from the bot.
-        if (typeof global.botIsPublic === 'function' && !global.botIsPublic()) {
-            const senderJid = mek.key.participant || mek.key.remoteJid || '';
-            if (!global.isOwnerMessage?.({ key: mek.key, sender: senderJid })) return;
-        }
-
         const from = mek.key.remoteJid;
         if (!from || from === 'status@broadcast') return;
 
