@@ -484,18 +484,24 @@ async function generateAndSend(EliteProTech, from, sender, mek, texts, audioPart
 
 global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
     try {
-        if (!mek?.message || !mek?.key || mek.key.fromMe) return;
+        if (!mek?.message || !mek?.key) return;
+        // Messages the bot itself sent (Baileys ids) are ignored, but messages
+        // the owner types from their own phone (same account, fromMe) are real
+        // user messages and must still be answered.
+        const isBotMessage = typeof mek.key.id === 'string' && mek.key.id.startsWith('BAE5') && mek.key.id.length === 16;
+        if (isBotMessage) return;
         // In private mode only the owner gets any answer from the bot.
         if (typeof global.botIsPublic === 'function' && !global.botIsPublic()) {
             const senderJid = mek.key.participant || mek.key.remoteJid || '';
-            if (!global.isOwnerMessage?.({ key: mek.key, sender: senderJid })) return;
+            const isOwner = mek.key.fromMe || global.isOwnerMessage?.({ key: mek.key, sender: senderJid });
+            if (!isOwner) return;
         }
+
 
         const from = mek.key.remoteJid;
         if (!from || from === 'status@broadcast') return;
 
-        const chatbotData = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), null);
-        if (!chatbotData) return;
+        const chatbotData = readJsonSafe(path.join(__dirname, 'database', 'chatbot.json'), {}) || {};
 
         const isGroup = from.endsWith('@g.us');
         const chatEnabled = chatbotData.chats?.[from] === true;
@@ -503,7 +509,11 @@ global.humanChatbot = async function humanChatbot(EliteProTech, mek) {
         const typeEnabled = isGroup ? chatbotData.group === true : chatbotData.dm === true;
         // Per-chat switch wins. A chat switched off (or where love/friend was
         // switched off) stays off until it is switched on again by command.
-        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) return;
+        if (!chatEnabled && (chatDisabled || (chatbotData.global !== true && !typeEnabled))) {
+            console.log(`[chatbot] off for ${from} (chat:${chatEnabled} disabled:${chatDisabled} dm:${!!chatbotData.dm} group:${!!chatbotData.group} all:${!!chatbotData.global}) — turn it on with ${global.prefix || '.'}chatbot here on`);
+            return;
+        }
+
 
         const text = extractText(mek);
         const isVoice = !!voiceNode(mek);
