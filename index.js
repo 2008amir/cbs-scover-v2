@@ -13,38 +13,19 @@ global.groupLink = GROUP_LINK;
 global.channelLink = CHANNEL_LINK;
 
 // ===== Gemini chatbot =====
-// Keys are read from the environment (.env), never hard-coded: keys committed
-// in source get scraped and Google disables them with
-// "Your API key was reported as leaked" (HTTP 403).
-// Set one or more keys in .env:
-//   GEMINI_KEY_1=...  GEMINI_KEY_2=...  (up to any number)
-//   or GEMINI_API_KEY / GEMINI_API_KEYS (comma separated)
+// Option 1 (recommended): the key comes from the environment, never from source.
+// Set GEMINI_API_KEY or GOOGLE_API_KEY in .env — if both are set,
+// GOOGLE_API_KEY takes precedence (same rule as the official client libraries).
 try { require('dotenv').config(); } catch {}
 
-const GEMINI_API_KEYS = (() => {
-    const numbered = Object.keys(process.env)
-        .filter(k => /^GEMINI[-_]?KEY[-_]?\d+$/i.test(k))
-        .sort((a, b) => (parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)))
-        .map(k => process.env[k]);
-    const legacy = String(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(/[,\s]+/);
-    return [...numbered, ...legacy]
-        .map(k => String(k || '').trim())
-        .filter(Boolean)
-        .filter((k, i, arr) => arr.indexOf(k) === i);
-})();
+const GEMINI_API_KEY = String(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '').trim();
 
-
-// Keys WhatsApp-side rotation should skip for the rest of this process:
-// a key revoked as leaked or invalid will never start working again.
-const GEMINI_DEAD_KEYS = new Set();
-
-// Remember which key last worked so the next request starts there.
-global.geminiKeyIndex = global.geminiKeyIndex || 0;
 const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
-if (!GEMINI_API_KEYS.length) {
-    console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> to .env to enable the chatbot.');
+if (!GEMINI_API_KEY) {
+    console.warn('⚠️  No Gemini API key configured. Add GEMINI_API_KEY=<your key> (or GOOGLE_API_KEY) to .env to enable the chatbot.');
 }
+
 
 
 
