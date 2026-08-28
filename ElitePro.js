@@ -1092,12 +1092,10 @@ function patchHandler(source) {
     }
 
 
-    // Private mode: only the owner's own WhatsApp account can run commands.
-    if (code.includes('if (!isCreator && !m.key.fromMe) return')) {
-        code = code.split('if (!isCreator && !m.key.fromMe) return').join('if (!m.key.fromMe) return');
-    } else {
-        console.log('⚠️ Private-mode patch target not found.');
-    }
+    // Mode is global for the whole bot (stored in database/mode.json), never
+    // per chat: private = only the owner numbers (and the bot itself) can run
+    // commands anywhere, public = everyone can. Keep the upstream gate as-is.
+
 
     // Branding
     code = code
