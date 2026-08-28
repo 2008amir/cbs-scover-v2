@@ -244,55 +244,44 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
         body.systemInstruction = { role: 'user', parts: [{ text: String(systemPrompt).slice(0, 12000) }] };
     }
 
-    const total = GEMINI_API_KEYS.length;
-    if (!total) {
-        console.error('Gemini: no API key configured (set GEMINI_API_KEY in .env).');
+    if (!GEMINI_API_KEY) {
+        console.error('Gemini: no API key configured (set GEMINI_API_KEY or GOOGLE_API_KEY in .env).');
         return '⚠️ The chatbot has no Gemini API key configured. Add GEMINI_API_KEY to the .env file and restart the bot.';
     }
 
     let lastError = null;
-    let leaked = false;
-    // Start from the key that worked last time, then roll over to the others.
-    for (let k = 0; k < total; k++) {
-        const keyIndex = (global.geminiKeyIndex + k) % total;
-        const key = GEMINI_API_KEYS[keyIndex];
-        if (GEMINI_DEAD_KEYS.has(key)) continue;
-        for (const model of GEMINI_MODELS) {
-            try {
-                const { data } = await axios.post(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
-                    body,
-                    { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-                );
-                const out = (data?.candidates?.[0]?.content?.parts || [])
-                    .map(p => p?.text || '').join('').trim();
-                if (out) {
-                    global.geminiKeyIndex = keyIndex; // remember the working key
-                    return out;
+    let invalidKey = false;
+    for (const model of GEMINI_MODELS) {
+        try {
+            const { data } = await axios.post(
+                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+                body,
+                {
+                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+                    timeout: 120000
                 }
-                lastError = new Error('empty gemini response');
-            } catch (err) {
-                // Silent fallback: move on to the next model, then the next key.
-                lastError = err;
-                const status = err?.response?.status;
-                const message = String(err?.response?.data?.error?.message || '');
-                // A revoked / leaked / invalid key never recovers — retire it
-                // for this process so it is not tried again on every message.
-                if (status === 400 || status === 403) {
-                    GEMINI_DEAD_KEYS.add(key);
-                    if (/leaked|revoked|invalid|expired|not valid/i.test(message)) leaked = true;
-                    console.warn(`Gemini: key #${keyIndex + 1} disabled by Google (${status}). Skipping it from now on.`);
-                    break; // no point trying other models with a dead key
-                }
+            );
+            const out = (data?.candidates?.[0]?.content?.parts || [])
+                .map(p => p?.text || '').join('').trim();
+            if (out) return out;
+            lastError = new Error('empty gemini response');
+        } catch (err) {
+            // Silent fallback: try the next model.
+            lastError = err;
+            const status = err?.response?.status;
+            const message = String(err?.response?.data?.error?.message || '');
+            if ((status === 400 || status === 403) && /leaked|revoked|invalid|expired|not valid|API key/i.test(message)) {
+                invalidKey = true;
+                break;
             }
         }
     }
-    // Every key failed — stop here instead of retrying in a loop.
-    console.error('Gemini error (all keys failed):', lastError?.response?.data?.error?.message || lastError?.message);
-    if (leaked || GEMINI_DEAD_KEYS.size >= total) {
-        return '⚠️ The Gemini API key is no longer valid (Google revoked it as leaked). Create a new key at https://aistudio.google.com/apikey, put it in .env as GEMINI_API_KEY and restart the bot.';
+    console.error('Gemini error:', lastError?.response?.data?.error?.message || lastError?.message);
+    if (invalidKey) {
+        return '⚠️ The Gemini API key is not valid. Create a new key at https://aistudio.google.com/apikey, put it in .env as GEMINI_API_KEY and restart the bot.';
     }
     return 'I could not generate a reply at this time. Please try again.';
+
 };
 
 
