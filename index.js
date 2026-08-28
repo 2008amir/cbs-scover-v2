@@ -279,9 +279,15 @@ global.geminiChat = async function geminiChat(systemPrompt, userText, extraParts
         for (const model of GEMINI_MODELS) {
             try {
                 const { data } = await axios.post(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
                     body,
-                    { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
+                    {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-goog-api-key': key
+                        },
+                        timeout: 120000
+                    }
                 );
                 const out = (data?.candidates?.[0]?.content?.parts || [])
                     .map(p => p?.text || '').join('').trim();
