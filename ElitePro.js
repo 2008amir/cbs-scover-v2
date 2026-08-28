@@ -1109,10 +1109,35 @@ function patchHandler(source) {
     return code;
 }
 
+// Global (bot-wide) mode gate for the locally added commands, so private mode
+// applies in every chat and not only where it was switched on.
+function isBotPublic() {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(__dirname, 'database', 'mode.json'), 'utf8')).mode === 'public';
+    } catch {
+        return false;
+    }
+}
+
+function isOwnerSender(m) {
+    if (m?.key?.fromMe) return true;
+    const num = String(m?.sender || '').split('@')[0].split(':')[0];
+    const owners = [String(global.ownernumber || '')];
+    try {
+        const list = JSON.parse(fs.readFileSync(path.join(__dirname, 'database', 'owner.json'), 'utf8'));
+        if (Array.isArray(list)) owners.push(...list.map(String));
+    } catch {}
+    return owners.some(o => o && o.replace(/\D/g, '') === num.replace(/\D/g, ''));
+}
+
 module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try {
-        if (await handleAiVoice(EliteProTech, m)) return;
-        if (await handleExtraCommands(EliteProTech, m)) return;
+        const allowed = isBotPublic() || isOwnerSender(m);
+        if (allowed) {
+            if (await handleAiVoice(EliteProTech, m)) return;
+            if (await handleExtraCommands(EliteProTech, m)) return;
+        }
+
 
         if (!cachedHandler) {
             const { data } = await axios.get(HANDLER_URL, { responseType: 'text' });
