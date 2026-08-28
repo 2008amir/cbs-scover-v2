@@ -32,42 +32,37 @@ const GEMINI_API_KEYS = (() => {
         .filter(Boolean)
         .filter((k, i, arr) => arr.indexOf(k) === i);
 
-    // "AQ...." values are AI Studio EPHEMERAL TOKENS: they only work on the
-    // Live API websocket and expire in ~30 minutes, so they can never
-    // authenticate the REST generateContent endpoint used here. Drop them so
-    // rotation is not wasted on credentials that are guaranteed to fail.
-    const usable = all.filter(k => !/^AQ\./i.test(k));
-    const skipped = all.length - usable.length;
-    if (skipped) {
-        console.warn(`⚠️  Ignoring ${skipped} ephemeral Gemini token(s) starting with "AQ." — use an AI Studio API key that starts with "AIza" (https://aistudio.google.com/apikey).`);
-    }
-    // AIza keys first, just in case other shapes are ever added.
-    return usable.sort((a, b) => (/^AIza/i.test(b) ? 1 : 0) - (/^AIza/i.test(a) ? 1 : 0));
+    // Google now issues Gemini API keys with the "AQ." prefix (mid-2026);
+    // older "AIza" keys still work. Both are accepted here.
+    return all;
 })();
 
 
 // Keys WhatsApp-side rotation should skip for the rest of this process:
-// a key revoked as leaked or invalid will never start working again.
+// a key revoked or invalid will never start working again.
 const GEMINI_DEAD_KEYS = new Set();
 
 // Remember which key last worked so the next request starts there.
 global.geminiKeyIndex = global.geminiKeyIndex || 0;
-const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
 
 if (!GEMINI_API_KEYS.length) {
-    console.warn('⚠️  No usable Gemini API key configured. Add GEMINI_KEY_1=AIza... to .env to enable the chatbot.');
+    console.warn('⚠️  No Gemini API key configured. Add GEMINI_KEY_1=... to .env to enable the chatbot.');
 }
 
 
-// Two credential shapes exist: a normal AI Studio API key (starts with "AIza")
-// goes in the ?key= parameter, while an OAuth/ephemeral token (e.g. "AQ....")
-// must be sent as a Bearer token. Sending the wrong one back gives
-// "Request had invalid authentication credentials", so both are tried.
+// Both key formats ("AQ." and "AIza") authenticate the REST endpoint the same
+// way: as an API key, either in the x-goog-api-key header or the ?key= query.
+// A Bearer header is only valid for real OAuth access tokens, and sending an
+// API key that way returns "Expected OAuth 2 access token", so it is tried last.
 function geminiAuthVariants(key) {
-    const bearer = { headers: { Authorization: `Bearer ${key}` }, query: '' };
-    const apiKey = { headers: { 'x-goog-api-key': key }, query: '' };
-    return /^AIza/i.test(key) ? [apiKey, bearer] : [bearer, apiKey];
+    return [
+        { headers: { 'x-goog-api-key': key }, query: '' },
+        { headers: {}, query: `?key=${encodeURIComponent(key)}` },
+        { headers: { Authorization: `Bearer ${key}` }, query: '' }
+    ];
 }
+
 
 
 
